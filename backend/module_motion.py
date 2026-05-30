@@ -63,7 +63,37 @@ async def _recompute_project_progress(db, project_id: str) -> None:
     )
 
 
-async def _emit_notification(db, *, user_id: str, type_: str, title: str, subtitle: str | None, project_id: str, module_id: str, severity: str = "info") -> None:
+async def _resolve_user_lang(db, user_id: str) -> str:
+    """Fetch the recipient's persisted UI language; default to `en`.
+
+    Used by `_emit_notification` so the row written to `db.notifications`
+    is already localized at write-time (no lazy translation on read).
+    """
+    try:
+        u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "language": 1})
+        if u:
+            lang = (u.get("language") or "").strip().lower().split("-", 1)[0]
+            if lang in ("en", "uk"):
+                return lang
+    except Exception:
+        pass
+    return "en"
+
+
+async def _emit_notification(
+    db,
+    *,
+    user_id: str,
+    type_: str,
+    title: str = "",
+    subtitle: str | None = None,
+    project_id: str,
+    module_id: str,
+    severity: str = "info",
+    i18n_key_title: str | None = None,
+    i18n_key_body: str | None = None,
+    i18n_fmt: dict | None = None,
+) -> None:
     """
     Push-нотификация для конкретного юзера. Живёт в отдельной коллекции
     `notifications` (не смешиваем с `events` — там warnings движка).
@@ -73,14 +103,37 @@ async def _emit_notification(db, *, user_id: str, type_: str, title: str, subtit
     push на все зарегистрированные устройства юзера. Каждый из шести
     вызовов `_emit_notification` по кодовой базе получает push «бесплатно»,
     без изменений в месте вызова.
+
+    i18n contract (Phase 9):
+      * Callers can pass literal `title` / `subtitle` (legacy), OR
+      * Pass `i18n_key_title` / `i18n_key_body` (+ `i18n_fmt` placeholders).
+        Recipient's `language` is resolved once and we translate before
+        insert so the persisted row is already in the user's locale.
+        The push payload reuses the same translated copy via
+        `send_push_nowait(..., i18n_key_title=..., i18n_key_body=...)`.
     """
+    final_title = title or ""
+    final_subtitle = subtitle or ""
+    lang = "en"
+    if i18n_key_title or i18n_key_body:
+        try:
+            from i18n_backend import t as _t
+            lang = await _resolve_user_lang(db, user_id)
+            fmt = i18n_fmt or {}
+            if i18n_key_title:
+                final_title = _t(i18n_key_title, lang, **fmt)
+            if i18n_key_body:
+                final_subtitle = _t(i18n_key_body, lang, **fmt)
+        except Exception as e:
+            logger.debug("module_motion i18n failed: %s", e)
+
     await db.notifications.insert_one({
         "notification_id": f"ntf_{uuid.uuid4().hex[:12]}",
         "user_id": user_id,
         "type": type_,          # review_ready | module_done | review_required
         "severity": severity,   # info | success | warning
-        "title": title,
-        "subtitle": subtitle,
+        "title": final_title,
+        "subtitle": final_subtitle,
         "project_id": project_id,
         "module_id": module_id,
         "read": False,
@@ -97,14 +150,18 @@ async def _emit_notification(db, *, user_id: str, type_: str, title: str, subtit
     send_push_nowait(
         db,
         user_id=user_id,
-        title=title,
-        body=subtitle or "",
+        title=final_title,
+        body=final_subtitle or "",
         data={
             "type": type_,
             "project_id": project_id,
             "module_id": module_id,
             "severity": severity,
         },
+        i18n_key_title=i18n_key_title,
+        i18n_key_body=i18n_key_body,
+        i18n_fmt=i18n_fmt,
+        lang=lang,
     )
 
 
@@ -229,15 +286,23 @@ async def _advance_project(db, project: Dict[str, Any]) -> None:
                     mod.get("module_id"), e,
                 )
             # EVENT BRIDGE: dev узнаёт что модуль закрыт и он заработал.
+            _mod_label = mod.get('title') or 'Module'
             await _emit_notification(
                 db,
                 user_id=assignee,
                 type_="module_done",
                 severity="success",
-                title=f"You earned ${dev_share:.0f}" if dev_share > 0 else "Module shipped",
-                subtitle=f"{mod.get('title') or 'Module'} completed · paid out",
                 project_id=pid,
                 module_id=mod["module_id"],
+                i18n_key_title=(
+                    "notif.mm.module_done_dev_earn.title" if dev_share > 0
+                    else "notif.mm.module_done_dev_ship.title"
+                ),
+                i18n_key_body=(
+                    "notif.mm.module_done_dev_earn.body" if dev_share > 0
+                    else "notif.mm.module_done_dev_ship.body"
+                ),
+                i18n_fmt={"amount": f"{dev_share:.0f}", "module": _mod_label},
             )
         # EVENT BRIDGE: клиент узнаёт что модуль доставлен.
         owner = project.get("owner_id") or project.get("client_id")
@@ -247,10 +312,11 @@ async def _advance_project(db, project: Dict[str, Any]) -> None:
                 user_id=owner,
                 type_="module_done",
                 severity="success",
-                title=f"{mod.get('title') or 'Module'} shipped",
-                subtitle="Your product grew by one module.",
                 project_id=pid,
                 module_id=mod["module_id"],
+                i18n_key_title="notif.mm.module_done_client.title",
+                i18n_key_body="notif.mm.module_done_client.body",
+                i18n_fmt={"module": mod.get('title') or 'Module'},
             )
         logger.info("MODULE MOTION: %s review→done (project=%s)", mod.get("title"), pid)
 
@@ -276,10 +342,11 @@ async def _advance_project(db, project: Dict[str, Any]) -> None:
                 user_id=owner,
                 type_="review_required",
                 severity="warning",
-                title=f"Review required: {mod.get('title') or 'Module'}",
-                subtitle="Approve to ship · dev is waiting",
                 project_id=pid,
                 module_id=mod["module_id"],
+                i18n_key_title="notif.mm.review_required.title",
+                i18n_key_body="notif.mm.review_required.body",
+                i18n_fmt={"module": mod.get('title') or 'Module'},
             )
         assignee = mod.get("assigned_to")
         if assignee:
@@ -290,10 +357,14 @@ async def _advance_project(db, project: Dict[str, Any]) -> None:
                 user_id=assignee,
                 type_="review_ready",
                 severity="info",
-                title=f"Awaiting review: {mod.get('title') or 'Module'}",
-                subtitle=f"${dev_share:.0f} pending · client is next" if dev_share > 0 else "Client is next · payout on approval",
                 project_id=pid,
                 module_id=mod["module_id"],
+                i18n_key_title="notif.mm.review_ready.title",
+                i18n_key_body=(
+                    "notif.mm.review_ready.body" if dev_share > 0
+                    else "notif.mm.review_ready.body_zero"
+                ),
+                i18n_fmt={"module": mod.get('title') or 'Module', "amount": f"{dev_share:.0f}"},
             )
         logger.info("MODULE MOTION: %s in_progress→review (project=%s)", mod.get("title"), pid)
 

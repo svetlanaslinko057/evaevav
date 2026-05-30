@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, Body
+from i18n_backend import raise_http, resolve_lang, t as _i18n_t
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -1890,11 +1891,11 @@ async def get_current_user(request: Request) -> User:
             session_token = auth_header[7:]
     
     if not session_token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        raise_http(401, "err.auth.not_authenticated", request=request)
     
     session = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
     if not session:
-        raise HTTPException(status_code=401, detail="Invalid session")
+        raise_http(401, "err.auth.invalid_session", request=request)
     
     expires_at = session["expires_at"]
     if isinstance(expires_at, str):
@@ -1902,17 +1903,17 @@ async def get_current_user(request: Request) -> User:
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=401, detail="Session expired")
+        raise_http(401, "err.auth.session_expired", request=request)
     
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user:
-        raise HTTPException(status_code=401, detail="User not found")
+        raise_http(401, "err.auth.user_not_found", request=request)
 
     # Phase 1 Step B: blocked / soft-deleted users cannot use the system.
     if user.get("status") == "blocked":
-        raise HTTPException(status_code=403, detail="Account blocked. Contact support.")
+        raise_http(403, "err.auth.account_blocked", request=request, user=user)
     if user.get("is_deleted"):
-        raise HTTPException(status_code=401, detail="Account deleted")
+        raise_http(401, "err.auth.account_deleted", request=request, user=user)
 
     if isinstance(user.get("created_at"), str):
         user["created_at"] = datetime.fromisoformat(user["created_at"])
@@ -1924,7 +1925,7 @@ def require_role(*roles):
     """Decorator to require specific roles"""
     async def role_checker(user: User = Depends(get_current_user)):
         if user.role not in roles:
-            raise HTTPException(status_code=403, detail=f"Requires one of roles: {roles}")
+            raise_http(403, "err.auth.role_required", user=user)
         return user
     return role_checker
 
@@ -1938,7 +1939,7 @@ async def create_session(request: Request, response: Response):
     session_id = body.get("session_id")
     
     if not session_id:
-        raise HTTPException(status_code=400, detail="session_id required")
+        raise_http(400, "err.auth.session_id_required", request=request)
     
     # Call Emergent Auth to get user data
     AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "https://demobackend.emergentagent.com")
