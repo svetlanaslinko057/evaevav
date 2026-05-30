@@ -2348,7 +2348,7 @@ async def password_reset_verify(request: _RLReq, req: PasswordResetVerify):
     if len(new_password) < 8:
         raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
     if len(code) != 6 or not code.isdigit():
-        raise HTTPException(status_code=400, detail="Invalid code format")
+        raise_http(400, "err.auth.invalid_code_format")
 
     # Find most recent unconsumed code for this email.
     code_doc = await db.password_reset_codes.find_one(
@@ -2365,7 +2365,7 @@ async def password_reset_verify(request: _RLReq, req: PasswordResetVerify):
     if exp.tzinfo is None:
         exp = exp.replace(tzinfo=timezone.utc)
     if datetime.now(timezone.utc) > exp:
-        raise HTTPException(status_code=400, detail="Code expired. Please request a new one.")
+        raise_http(400, "err.otp.expired")
 
     # Attempts cap (5).
     if code_doc.get("attempts", 0) >= 5:
@@ -2473,7 +2473,7 @@ async def update_user_role(
     )
     
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise_http(404, "err.auth.user_not_found")
     
     return {"message": "Role updated"}
 
@@ -5261,7 +5261,7 @@ async def initiate_deliverable_payment(
     # Get invoice
     invoice = await db.invoices.find_one({"invoice_id": invoice_id}, {"_id": 0})
     if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+        raise_http(404, "err.invoice.not_found")
     
     # Phase 4 — real provider (WayForPay) hosted payment.
     payment_id = f"pay_{uuid.uuid4().hex[:12]}"
@@ -11502,7 +11502,7 @@ async def client_pay_invoice(
     """
     inv = await db.invoices.find_one({"invoice_id": invoice_id}, {"_id": 0})
     if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+        raise_http(404, "err.invoice.not_found")
     if inv.get("client_id") != user.user_id:
         raise HTTPException(status_code=403, detail="Not your invoice")
     if inv.get("status") == "paid":
@@ -12757,7 +12757,7 @@ async def mark_invoice_paid_legacy(
         {"$set": {"status": "paid", "paid_at": now.isoformat()}}
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+        raise_http(404, "err.invoice.not_found")
     
     # Trigger client referral payout
     try:
@@ -12871,9 +12871,9 @@ async def admin_resend_invoice(
     the customer never opened it."""
     inv = await db.invoices.find_one({"invoice_id": invoice_id}, {"_id": 0})
     if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+        raise_http(404, "err.invoice.not_found")
     if inv.get("status") == "paid":
-        raise HTTPException(status_code=400, detail="Invoice already paid")
+        raise_http(400, "err.invoice.already_paid")
 
     enriched = await _provider_create_payment(inv)
 
@@ -12911,7 +12911,7 @@ async def admin_billing_mark_paid(
     payout). Use when payment cleared off-platform but callback never arrived."""
     inv = await db.invoices.find_one({"invoice_id": invoice_id}, {"_id": 0})
     if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+        raise_http(404, "err.invoice.not_found")
     if inv.get("status") == "paid":
         return {"ok": True, "invoice_id": invoice_id, "already": True}
 
@@ -14887,10 +14887,10 @@ async def create_wayforpay_payment(
     """
     invoice = await db.invoices.find_one({"invoice_id": request.invoice_id}, {"_id": 0})
     if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+        raise_http(404, "err.invoice.not_found")
 
     if invoice.get("status") == "paid":
-        raise HTTPException(status_code=400, detail="Invoice already paid")
+        raise_http(400, "err.invoice.already_paid")
 
     # Reuse existing payment_url if still pending — avoids creating duplicate
     # WayForPay invoices for the same client click.
@@ -15235,7 +15235,7 @@ async def get_client_invoice(invoice_id: str, user: User = Depends(get_current_u
     """
     inv = await db.invoices.find_one({"invoice_id": invoice_id}, {"_id": 0})
     if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+        raise_http(404, "err.invoice.not_found")
     if inv.get("client_id") != user.user_id and user.role != "admin":
         raise HTTPException(status_code=403, detail="Not your invoice")
 
@@ -15268,7 +15268,7 @@ async def get_payment_status(invoice_id: str, user: User = Depends(get_current_u
     """Get payment status for invoice"""
     invoice = await db.invoices.find_one({"invoice_id": invoice_id}, {"_id": 0})
     if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+        raise_http(404, "err.invoice.not_found")
     
     payment = await db.payments.find_one(
         {"invoice_id": invoice_id},
@@ -26590,7 +26590,7 @@ async def serve_chat_upload(user_id: str, filename: str):
     from fastapi.responses import FileResponse as _FR  # local import to avoid top-level coupling
     path = _CHAT_UPLOADS_DIR / user_id / filename
     if not path.exists():
-        raise HTTPException(status_code=404, detail="Not found")
+        raise_http(404, "err.generic.not_found")
     return _FR(path)
 
 

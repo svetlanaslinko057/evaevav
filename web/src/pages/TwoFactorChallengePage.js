@@ -144,7 +144,7 @@ export default function TwoFactorChallengePage() {
               maxLength={6}
               value={code}
               onChange={(e) => { setCode(e.target.value.replace(/\D/g, '').slice(0, 6)); if (error) setError(''); }}
-              placeholder="000000"
+              placeholder={tByEn("000000")}
               className="w-full bg-surface border border-border rounded-lg px-4 py-4 text-center text-3xl tracking-[0.5em] font-bold text-text-primary placeholder:text-text-muted focus:outline-none focus:border-signal"
             />
           ) : (

@@ -126,7 +126,7 @@ const ForgotPasswordModal = ({ open, onClose, defaultEmail = '' }) => {
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--token-surface-secondary)'; e.currentTarget.style.color = 'var(--token-text-primary)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--token-text-muted)'; }}
           data-testid="forgot-close-btn"
-          aria-label="Close"
+          aria-label={tByEn('Close')}
         >
           <X className="w-4 h-4" />
         </button>
@@ -201,7 +201,7 @@ const ForgotPasswordModal = ({ open, onClose, defaultEmail = '' }) => {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.com"
+                placeholder={tByEn('you@company.com')}
                 className="w-full rounded-xl px-4 py-3 text-sm outline-none transition-all"
                 style={{
                   background: 'var(--token-surface)',
@@ -244,7 +244,7 @@ const ForgotPasswordModal = ({ open, onClose, defaultEmail = '' }) => {
                 maxLength={6}
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                placeholder="000000"
+                placeholder={tByEn('000000')}
                 className="w-full rounded-xl px-4 py-3 text-lg font-mono tracking-[0.3em] text-center outline-none transition-all"
                 style={{
                   background: 'var(--token-surface)',
@@ -278,7 +278,7 @@ const ForgotPasswordModal = ({ open, onClose, defaultEmail = '' }) => {
                   type={showPassword ? 'text' : 'password'}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="At least 8 characters"
+                  placeholder={tByEn('At least 8 characters')}
                   className="w-full rounded-xl px-4 py-3 pr-12 text-sm outline-none transition-all"
                   style={{
                     background: 'var(--token-surface)',

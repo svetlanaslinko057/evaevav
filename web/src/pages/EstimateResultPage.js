@@ -424,7 +424,7 @@ const InlineSignup = ({ estimate, originalGoal, login }) => {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Your name"
+            placeholder={tByEn("Your name")}
             disabled={busy}
             className="w-full bg-card text-foreground border border-border rounded-xl px-4 py-3 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[var(--t-signal)]"
             data-testid="result-signup-name"

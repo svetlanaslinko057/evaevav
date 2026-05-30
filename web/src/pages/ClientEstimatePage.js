@@ -114,7 +114,7 @@ const ClientEstimatePage = () => {
         <textarea
           value={idea}
           onChange={(e) => setIdea(e.target.value)}
-          placeholder="e.g. I want to build a marketplace with user authentication, payment processing, chat between buyers and sellers, and an admin dashboard..."
+          placeholder={tByEn("e.g. I want to build a marketplace with user authentication, payment processing, chat between buyers and sellers, and an admin dashboard...")}
           className="w-full h-40 bg-black/30 border border-border rounded-xl p-4 text-white placeholder:text-muted-foreground focus:outline-none focus:border-signal/30 resize-none"
           data-testid="estimate-idea-input"
         />

@@ -286,7 +286,7 @@ const ClientAuthPage = () => {
                     type="text"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    placeholder="Your name"
+                    placeholder={tByEn('Your name')}
                     className="w-full bg-muted border border-border rounded-xl px-4 py-3.5 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
                     required={mode === 'register'}
                     data-testid="input-name"
@@ -300,7 +300,7 @@ const ClientAuthPage = () => {
                   type="email"
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  placeholder="you@company.com"
+                  placeholder={tByEn("you@company.com")}
                   className="w-full bg-muted border border-border rounded-xl px-4 py-3.5 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
                   required
                   data-testid="input-email"
@@ -314,7 +314,7 @@ const ClientAuthPage = () => {
                     type={showPassword ? 'text' : 'password'}
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    placeholder="••••••••"
+                    placeholder={tByEn("••••••••")}
                     className="w-full bg-muted border border-border rounded-xl px-4 py-3.5 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all pr-12"
                     required
                     data-testid="input-password"

@@ -171,7 +171,7 @@ export default function TwoFactorSetupModal({ open, onClose, onEnabled }) {
             e.currentTarget.style.color = 'var(--token-text-muted)';
           }}
           data-testid="2fa-modal-close"
-          aria-label="Close"
+          aria-label={tByEn("Close")}
         >
           <X className="w-4 h-4" />
         </button>
@@ -257,7 +257,7 @@ export default function TwoFactorSetupModal({ open, onClose, onEnabled }) {
                   setCode(e.target.value.replace(/\D/g, '').slice(0, 6));
                   if (error) setError('');
                 }}
-                placeholder="000000"
+                placeholder={tByEn("000000")}
                 className="mt-1.5 w-full bg-surface border border-border rounded-lg px-4 py-4 text-center text-3xl tracking-[0.5em] font-bold text-text-primary placeholder:text-text-muted focus:outline-none focus:border-signal"
               />
 
