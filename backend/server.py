@@ -18205,7 +18205,38 @@ ACHIEVEMENT_DEFINITIONS = [
 ]
 
 
-async def create_notification(user_id: str, ntype: str, title: str, message: str, data: dict = None):
+async def _get_user_lang(user_id: str) -> str:
+    """Look up the persisted UI language for a user, defaulting to `en`.
+
+    Used by `create_notification` / push-pipe to translate at write time
+    so the row stored in `db.notifications` is already in the user's
+    locale (we don't lazily translate on read — clients should never need
+    to know the i18n dictionary).
+    """
+    try:
+        u = await db.users.find_one(
+            {"user_id": user_id}, {"_id": 0, "language": 1}
+        )
+        if u:
+            lang = (u.get("language") or "").strip().lower().split("-", 1)[0]
+            if lang in ("en", "uk"):
+                return lang
+    except Exception:
+        pass
+    return "en"
+
+
+async def create_notification(
+    user_id: str,
+    ntype: str,
+    title: str = "",
+    message: str = "",
+    data: dict = None,
+    *,
+    i18n_key_title: str | None = None,
+    i18n_key_body: str | None = None,
+    i18n_fmt: dict | None = None,
+):
     """Create a notification and emit via realtime.
 
     NOTE — writes BOTH `is_read` and `read` for forward-compat with the
@@ -18213,13 +18244,35 @@ async def create_notification(user_id: str, ntype: str, title: str, message: str
     `/notifications/unread-count` used `is_read`). Both readers are now
     aligned, but we keep dual-write so older clients on either field stay
     consistent. Cheap insurance.
+
+    i18n contract:
+      * Callers can pass literal `title` / `message` (legacy), OR
+      * Pass `i18n_key_title` / `i18n_key_body` (+ `i18n_fmt` placeholders).
+        We resolve the recipient's `language` once and translate before
+        insert so the DB row is already localized. Push payload reuses
+        the same translated copy — no double work.
     """
+    final_title = title or ""
+    final_message = message or ""
+    lang = "en"
+    if i18n_key_title or i18n_key_body:
+        try:
+            from i18n_backend import t as _t
+            lang = await _get_user_lang(user_id)
+            fmt = i18n_fmt or {}
+            if i18n_key_title:
+                final_title = _t(i18n_key_title, lang, **fmt)
+            if i18n_key_body:
+                final_message = _t(i18n_key_body, lang, **fmt)
+        except Exception as e:
+            logger.debug("create_notification i18n failed: %s", e)
+
     notif = {
         "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
         "user_id": user_id,
         "type": ntype,
-        "title": title,
-        "message": message,
+        "title": final_title,
+        "message": final_message,
         "data": data or {},
         "is_read": False,
         "read": False,
@@ -18237,9 +18290,10 @@ async def create_notification(user_id: str, ntype: str, title: str, message: str
         send_push_nowait(
             db,
             user_id=user_id,
-            title=title,
-            body=message,
+            title=final_title,
+            body=final_message,
             data={"type": ntype, **(data or {})},
+            lang=lang,
         )
     return notif
 
