@@ -1950,7 +1950,7 @@ async def create_session(request: Request, response: Response):
         )
         
         if auth_response.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid session_id")
+            raise_http(401, "err.auth.invalid_session_id", request=request)
         
         auth_data = auth_response.json()
     
@@ -2094,11 +2094,11 @@ async def register_user(request: _RLReq, req: RegisterRequest, response: Respons
     # Check if user exists
     existing = await db.users.find_one({"email": email})
     if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise_http(400, "err.auth.email_taken", request=request)
     
     # Validate role
     if req.role not in ["client", "developer", "tester"]:
-        raise HTTPException(status_code=400, detail="Invalid role")
+        raise_http(400, "err.auth.invalid_role", request=request)
     
     # Create user
     user_id = f"user_{uuid.uuid4().hex[:12]}"
@@ -2175,15 +2175,15 @@ async def login_user(request: _RLReq, req: LoginRequest, response: Response):
     # Find user
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise_http(401, "err.auth.invalid_credentials_short", request=request)
     
     # Check password with bcrypt
     if user.get("password_hash"):
         if not verify_password(req.password, user["password_hash"]):
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+            raise_http(401, "err.auth.invalid_credentials_short", request=request)
     else:
         # Legacy user without password (OAuth only)
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise_http(401, "err.auth.invalid_credentials_short", request=request)
     
     # 2FA gate — same contract as /mobile/auth/login. If enabled, we
     # short-circuit BEFORE issuing the session cookie and hand the client
@@ -2277,7 +2277,7 @@ async def password_reset_request(request: _RLReq, req: PasswordResetRequest):
         "created_at": {"$gte": one_hour_ago},
     })
     if recent >= 3:
-        raise HTTPException(status_code=429, detail="Too many reset requests. Wait an hour.")
+        raise_http(429, "err.otp.too_many_resets", request=request)
 
     code = f"{random.randint(0, 999999):06d}"
     code_doc = {
@@ -2346,7 +2346,7 @@ async def password_reset_verify(request: _RLReq, req: PasswordResetVerify):
     new_password = req.new_password or ""
 
     if len(new_password) < 8:
-        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+        raise_http(422, "err.auth.password_too_short", request=request)
     if len(code) != 6 or not code.isdigit():
         raise_http(400, "err.auth.invalid_code_format")
 
@@ -2356,7 +2356,7 @@ async def password_reset_verify(request: _RLReq, req: PasswordResetVerify):
         sort=[("created_at", -1)],
     )
     if not code_doc:
-        raise HTTPException(status_code=400, detail="No active reset request. Please request a new code.")
+        raise_http(400, "err.otp.no_active_request", request=request)
 
     # Expiry check.
     exp = code_doc["expires_at"]
@@ -2369,14 +2369,14 @@ async def password_reset_verify(request: _RLReq, req: PasswordResetVerify):
 
     # Attempts cap (5).
     if code_doc.get("attempts", 0) >= 5:
-        raise HTTPException(status_code=429, detail="Too many attempts. Request a new code.")
+        raise_http(429, "err.otp.too_many_requests", request=request)
 
     if code_doc["code"] != code:
         await db.password_reset_codes.update_one(
             {"reset_id": code_doc["reset_id"]},
             {"$inc": {"attempts": 1}},
         )
-        raise HTTPException(status_code=400, detail="Invalid code")
+        raise_http(400, "err.otp.invalid_code", request=request)
 
     # Rotate password + invalidate all sessions.
     user_id = code_doc["user_id"]
@@ -2465,7 +2465,7 @@ async def update_user_role(
 ):
     """Admin: Update user role"""
     if role not in ["client", "developer", "tester", "admin", "provider"]:
-        raise HTTPException(status_code=400, detail="Invalid role")
+        raise_http(400, "err.auth.invalid_role")
     
     result = await db.users.update_one(
         {"user_id": user_id},
@@ -2666,7 +2666,7 @@ async def complete_onboarding(req: OnboardingRequest, response: Response):
     # Check if user already exists
     existing_user = await db.users.find_one({"email": email}, {"_id": 0})
     if existing_user:
-        raise HTTPException(status_code=400, detail="User already exists")
+        raise_http(400, "err.auth.user_exists")
     
     # Create new user
     user_id = f"user_{uuid.uuid4().hex[:12]}"
@@ -3009,7 +3009,7 @@ async def register_push_device(
 ):
     token = (body.token or "").strip()
     if not token:
-        raise HTTPException(status_code=400, detail="Missing push token")
+        raise_http(400, "err.push.missing_token")
     now = datetime.now(timezone.utc).isoformat()
     await db.push_tokens.update_one(
         {"token": token},
@@ -3199,11 +3199,11 @@ async def get_client_workspace(
     # Get project
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     # Verify client ownership
     if project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your project")
+        raise_http(403, "err.project.not_yours")
     
     # Get all tasks
     all_tasks = await db.work_units.find({"project_id": project_id}, {"_id": 0}).to_list(500)
@@ -3397,7 +3397,7 @@ async def get_request(request_id: str, user: User = Depends(get_current_user)):
     """Get single request"""
     request = await db.requests.find_one({"request_id": request_id}, {"_id": 0})
     if not request:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise_http(404, "err.request.not_found")
     return request
 
 
@@ -3416,7 +3416,7 @@ async def update_request(request_id: str, data: dict, user: User = Depends(get_c
             {"$set": update_data}
         )
         if result.modified_count == 0:
-            raise HTTPException(status_code=404, detail="Request not found")
+            raise_http(404, "err.request.not_found")
     
     return {"message": "Updated"}
 
@@ -3426,15 +3426,15 @@ async def delete_request(request_id: str, user: User = Depends(get_current_user)
     """Delete a request (only if not active)"""
     request = await db.requests.find_one({"request_id": request_id})
     if not request:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise_http(404, "err.request.not_found")
     
     # Check ownership
     if user.role == "client" and request.get("user_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise_http(403, "err.auth.not_authorized")
     
     # Check if can delete
     if request.get("status") in ["active", "delivery"]:
-        raise HTTPException(status_code=400, detail="Cannot delete active project")
+        raise_http(400, "err.project.cannot_delete_active")
     
     await db.requests.delete_one({"request_id": request_id})
     return {"message": "Deleted"}
@@ -3455,11 +3455,11 @@ async def get_project(project_id: str, user: User = Depends(get_current_user)):
     """Get project details"""
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     # Ownership check: client can only see own projects
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     if isinstance(project.get("created_at"), str):
         project["created_at"] = datetime.fromisoformat(project["created_at"])
@@ -3472,9 +3472,9 @@ async def get_project_deliverables(project_id: str, user: User = Depends(get_cur
     # Ownership check
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     deliverables = await db.deliverables.find({"project_id": project_id}, {"_id": 0}).to_list(100)
     for d in deliverables:
@@ -3487,7 +3487,7 @@ async def verify_deliverable_ownership(deliverable_id: str, user: User) -> dict:
     """Helper to verify client owns the deliverable"""
     deliverable = await db.deliverables.find_one({"deliverable_id": deliverable_id}, {"_id": 0})
     if not deliverable:
-        raise HTTPException(status_code=404, detail="Deliverable not found")
+        raise_http(404, "err.deliverable.not_found")
     
     # Admin can access all
     if user.role == "admin":
@@ -3496,7 +3496,7 @@ async def verify_deliverable_ownership(deliverable_id: str, user: User) -> dict:
     # Client must own the project
     project = await db.projects.find_one({"project_id": deliverable["project_id"]}, {"_id": 0})
     if not project or (user.role == "client" and project.get("client_id") != user.user_id):
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     return deliverable
 
@@ -3614,10 +3614,10 @@ async def get_client_project_work_status(
     # Verify ownership
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     # Get work units grouped by status
     in_progress = await db.work_units.find(
@@ -3656,10 +3656,10 @@ async def get_client_project_workspace(
     # Verify ownership
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     # Get all work units
     all_units = await db.work_units.find(
@@ -3780,7 +3780,7 @@ async def start_work(
         {"$set": {"status": "in_progress"}}
     )
     if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Cannot start work on this unit")
+        raise_http(400, "err.work_unit.cannot_start")
     return {"message": "Work started"}
 
 
@@ -3798,11 +3798,11 @@ async def update_work_unit_status(
     """Developer: Update work unit status (with allowed transitions)"""
     work_unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not work_unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     # Guard: must be assigned to this developer
     if work_unit.get("assigned_to") != user.user_id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Work unit not assigned to you")
+        raise_http(403, "err.work_unit.not_assigned")
     
     current_status = work_unit.get("status")
     new_status = update.status
@@ -3905,7 +3905,7 @@ async def submit_work(
     # Get work unit and verify status
     work_unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not work_unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     # Guard: can only submit from in_progress or revision
     allowed_statuses = ["in_progress", "revision"]
@@ -3917,7 +3917,7 @@ async def submit_work(
     
     # Guard: must be assigned to this developer
     if work_unit.get("assigned_to") != user.user_id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Work unit not assigned to you")
+        raise_http(403, "err.work_unit.not_assigned")
     
     logger.info(f"SUBMIT: unit_id={unit_id}, status_before={work_unit.get('status')}, dev={user.user_id}")
     
@@ -4013,7 +4013,7 @@ async def pass_validation(
     # Get validation task
     validation = await db.validation_tasks.find_one({"validation_id": validation_id}, {"_id": 0})
     if not validation:
-        raise HTTPException(status_code=404, detail="Validation task not found")
+        raise_http(404, "err.validation_task.not_found")
 
     current_status = validation.get("status")
     current_tester = validation.get("tester_id") or validation.get("assigned_to")
@@ -4051,7 +4051,7 @@ async def fail_validation(
     # Get validation task
     validation = await db.validation_tasks.find_one({"validation_id": validation_id}, {"_id": 0})
     if not validation:
-        raise HTTPException(status_code=404, detail="Validation task not found")
+        raise_http(404, "err.validation_task.not_found")
 
     current_status = validation.get("status")
     current_tester = validation.get("tester_id") or validation.get("assigned_to")
@@ -4116,7 +4116,7 @@ async def get_validation_details(
     """Tester: Get validation details including work unit and submission"""
     validation = await db.validation_tasks.find_one({"validation_id": validation_id}, {"_id": 0})
     if not validation:
-        raise HTTPException(status_code=404, detail="Validation not found")
+        raise_http(404, "err.validation.not_found")
     
     work_unit = await db.work_units.find_one({"unit_id": validation.get("unit_id")}, {"_id": 0})
     submission = await db.submissions.find_one({"unit_id": validation.get("unit_id")}, {"_id": 0})
@@ -4258,7 +4258,7 @@ async def get_master_request_detail(request_id: str, admin: User = Depends(requi
     """Master Admin: Get full request details"""
     req = await db.requests.find_one({"request_id": request_id}, {"_id": 0})
     if not req:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise_http(404, "err.request.not_found")
     
     # Get client info
     client = await db.users.find_one({"user_id": req.get("user_id")}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "company": 1})
@@ -4274,7 +4274,7 @@ async def start_request_review(request_id: str, admin: User = Depends(require_ro
     """Master Admin: Start reviewing a request"""
     req = await db.requests.find_one({"request_id": request_id}, {"_id": 0})
     if not req:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise_http(404, "err.request.not_found")
     
     current_status = req.get("status", "idea_submitted")
     if current_status == "pending":
@@ -4309,7 +4309,7 @@ async def create_request_proposal(
     """Master Admin: Create proposal for request"""
     req = await db.requests.find_one({"request_id": request_id}, {"_id": 0})
     if not req:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise_http(404, "err.request.not_found")
     
     current_status = req.get("status", "idea_submitted")
     if current_status not in ["reviewing", "idea_submitted", "pending"]:
@@ -4357,7 +4357,7 @@ async def reject_request(
     """Master Admin: Reject request"""
     req = await db.requests.find_one({"request_id": request_id}, {"_id": 0})
     if not req:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise_http(404, "err.request.not_found")
     
     now = datetime.now(timezone.utc)
     await db.requests.update_one(
@@ -4390,14 +4390,14 @@ async def client_approve_proposal(
     """Client: Approve proposal and activate project"""
     req = await db.requests.find_one({"request_id": request_id}, {"_id": 0})
     if not req:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise_http(404, "err.request.not_found")
     
     # Ownership check
     if user.role == "client" and req.get("user_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     if req.get("status") != "proposal_ready":
-        raise HTTPException(status_code=400, detail="Proposal is not ready for approval")
+        raise_http(400, "err.proposal.not_ready_approval")
     
     now = datetime.now(timezone.utc)
     
@@ -4448,14 +4448,14 @@ async def client_request_proposal_changes(
     """Client: Request changes to proposal"""
     req = await db.requests.find_one({"request_id": request_id}, {"_id": 0})
     if not req:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise_http(404, "err.request.not_found")
     
     # Ownership check
     if user.role == "client" and req.get("user_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     if req.get("status") != "proposal_ready":
-        raise HTTPException(status_code=400, detail="Proposal is not ready")
+        raise_http(400, "err.proposal.not_ready")
     
     now = datetime.now(timezone.utc)
     
@@ -4503,7 +4503,7 @@ async def approve_request(request_id: str, admin: User = Depends(require_role("a
         {"$set": {"status": "reviewing", "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise_http(404, "err.request.not_found")
     return {"message": "Request moved to review"}
 
 
@@ -4518,7 +4518,7 @@ async def create_project_scope(
     """Admin: Create scope for an active project"""
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     # Check if scope already exists
     existing_scope = await db.scopes.find_one({"project_id": project_id})
@@ -4590,7 +4590,7 @@ async def create_work_unit(
     """Admin: Create a work unit in scope"""
     scope = await db.scopes.find_one({"scope_id": scope_id}, {"_id": 0})
     if not scope:
-        raise HTTPException(status_code=404, detail="Scope not found")
+        raise_http(404, "err.scope.not_found")
     
     now = datetime.now(timezone.utc)
     unit_doc = {
@@ -4631,7 +4631,7 @@ async def bulk_create_work_units(
     """Admin: Bulk create work units from proposal features"""
     scope = await db.scopes.find_one({"scope_id": scope_id}, {"_id": 0})
     if not scope:
-        raise HTTPException(status_code=404, detail="Scope not found")
+        raise_http(404, "err.scope.not_found")
     
     now = datetime.now(timezone.utc)
     created_units = []
@@ -4675,7 +4675,7 @@ async def get_work_unit_detail(
     """Admin: Get work unit details with submissions"""
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     # Get submissions
     submissions = await db.submissions.find(
@@ -4714,11 +4714,11 @@ async def assign_work_unit(
     """Admin: Assign work unit to developer"""
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     developer = await db.users.find_one({"user_id": payload.developer_id}, {"_id": 0})
     if not developer:
-        raise HTTPException(status_code=404, detail="Developer not found")
+        raise_http(404, "err.developer.not_found")
     
     now = datetime.now(timezone.utc)
     
@@ -4774,10 +4774,10 @@ async def review_work_unit(
     """Admin: Review submitted work unit"""
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     if unit.get("status") != "review":
-        raise HTTPException(status_code=400, detail="Unit is not in review status")
+        raise_http(400, "err.work_unit.not_in_review")
     
     now = datetime.now(timezone.utc)
     new_status = "done" if payload.approved else "revision"
@@ -4863,7 +4863,7 @@ async def get_executor_units(
 ):
     """Executor: Get assigned work units"""
     if user.role not in ["developer", "executor", "tester"]:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     units = await db.work_units.find(
         {"assigned_to": user.user_id},
@@ -4892,10 +4892,10 @@ async def get_executor_unit_detail(
     """Executor: Get work unit details"""
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     if unit.get("assigned_to") != user.user_id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     # Get project
     project = await db.projects.find_one({"project_id": unit["project_id"]}, {"_id": 0, "project_id": 1, "name": 1})
@@ -4929,10 +4929,10 @@ async def update_executor_unit_status(
     """Executor: Update work unit status (start work, etc.)"""
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     if unit.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not assigned to you")
+        raise_http(403, "err.task.not_assigned")
     
     # Valid transitions
     valid_transitions = {
@@ -4972,13 +4972,13 @@ async def submit_work_unit(
     """Executor: Submit work for review"""
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     if unit.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not assigned to you")
+        raise_http(403, "err.task.not_assigned")
     
     if unit.get("status") not in ["in_progress", "revision"]:
-        raise HTTPException(status_code=400, detail="Unit must be in progress or revision to submit")
+        raise_http(400, "err.work_unit.not_in_progress")
     
     now = datetime.now(timezone.utc)
     
@@ -5027,10 +5027,10 @@ async def log_work_time(
     """Executor: Log work time"""
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     if unit.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not assigned to you")
+        raise_http(403, "err.task.not_assigned")
     
     now = datetime.now(timezone.utc)
     
@@ -5105,7 +5105,7 @@ async def create_deliverable(
     """Admin: Create deliverable from completed work units"""
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     now = datetime.now(timezone.utc)
     
@@ -5167,11 +5167,11 @@ async def publish_deliverable_for_payment(
     """Admin: Set price and publish deliverable for client payment"""
     deliverable = await db.deliverables.find_one({"deliverable_id": deliverable_id}, {"_id": 0})
     if not deliverable:
-        raise HTTPException(status_code=404, detail="Deliverable not found")
+        raise_http(404, "err.deliverable.not_found")
     
     project = await db.projects.find_one({"project_id": deliverable["project_id"]}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     now = datetime.now(timezone.utc)
     
@@ -5244,19 +5244,19 @@ async def initiate_deliverable_payment(
     """Client: Initiate payment for a deliverable"""
     deliverable = await db.deliverables.find_one({"deliverable_id": deliverable_id}, {"_id": 0})
     if not deliverable:
-        raise HTTPException(status_code=404, detail="Deliverable not found")
+        raise_http(404, "err.deliverable.not_found")
     
     # Verify ownership
     project = await db.projects.find_one({"project_id": deliverable["project_id"]}, {"_id": 0})
     if not project or project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     if deliverable.get("status") != "pending_payment":
         raise HTTPException(status_code=400, detail=f"Deliverable not ready for payment. Status: {deliverable.get('status')}")
     
     invoice_id = deliverable.get("invoice_id")
     if not invoice_id:
-        raise HTTPException(status_code=400, detail="No invoice found for this deliverable")
+        raise_http(400, "err.invoice.not_found_for_deliverable")
     
     # Get invoice
     invoice = await db.invoices.find_one({"invoice_id": invoice_id}, {"_id": 0})
@@ -5327,11 +5327,11 @@ async def get_client_deliverables(
     """Client: Get deliverables for project"""
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     # Check ownership
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     deliverables = await db.deliverables.find(
         {"project_id": project_id},
@@ -5349,11 +5349,11 @@ async def get_deliverable_detail(
     """Client: Get deliverable details"""
     deliverable = await db.deliverables.find_one({"deliverable_id": deliverable_id}, {"_id": 0})
     if not deliverable:
-        raise HTTPException(status_code=404, detail="Deliverable not found")
+        raise_http(404, "err.deliverable.not_found")
     
     # Check ownership
     if user.role == "client" and deliverable.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     # Get work units info
     work_units = []
@@ -5377,14 +5377,14 @@ async def approve_deliverable(
     """Client: Approve deliverable"""
     deliverable = await db.deliverables.find_one({"deliverable_id": deliverable_id}, {"_id": 0})
     if not deliverable:
-        raise HTTPException(status_code=404, detail="Deliverable not found")
+        raise_http(404, "err.deliverable.not_found")
     
     # Check ownership
     if user.role == "client" and deliverable.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     if deliverable.get("status") != "pending_approval":
-        raise HTTPException(status_code=400, detail="Deliverable is not pending approval")
+        raise_http(400, "err.deliverable.not_pending")
     
     now = datetime.now(timezone.utc)
     
@@ -5504,14 +5504,14 @@ async def reject_deliverable(
     """Client: Reject deliverable with feedback"""
     deliverable = await db.deliverables.find_one({"deliverable_id": deliverable_id}, {"_id": 0})
     if not deliverable:
-        raise HTTPException(status_code=404, detail="Deliverable not found")
+        raise_http(404, "err.deliverable.not_found")
     
     # Check ownership
     if user.role == "client" and deliverable.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     if deliverable.get("status") != "pending_approval":
-        raise HTTPException(status_code=400, detail="Deliverable is not pending approval")
+        raise_http(400, "err.deliverable.not_pending")
     
     now = datetime.now(timezone.utc)
     
@@ -5560,11 +5560,11 @@ async def get_client_project_dashboard(
     """Client: Get full project dashboard data"""
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     # Check ownership
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     # Get deliverables
     deliverables = await db.deliverables.find(
@@ -5934,7 +5934,7 @@ async def assign_validation(
         {"$set": {"tester_id": tester_id, "status": "in_progress"}}
     )
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Validation task not found")
+        raise_http(404, "err.validation_task.not_found")
     return {"message": "Validation assigned"}
 
 
@@ -5978,7 +5978,7 @@ async def admin_qa_decision_v2(
     # Get task
     task = await db.work_units.find_one({"unit_id": task_id}, {"_id": 0})
     if not task:
-        raise HTTPException(404, "Task not found")
+        raise_http(404, "err.task.not_found")
     
     project_id = task.get("project_id", "unknown")
     
@@ -6048,7 +6048,7 @@ async def get_task_qa_history(
     if user.role == "developer":
         task = await db.work_units.find_one({"unit_id": task_id}, {"_id": 0})
         if not task or task.get("assigned_to") != user.user_id:
-            raise HTTPException(403, "Not authorized to view this task's QA history")
+            raise_http(403, "err.auth.not_authorized_qa")
     
     history = await get_qa_history(task_id, db)
     
@@ -6079,7 +6079,7 @@ async def get_developer_qa_performance_endpoint(
     from qa_layer import get_developer_qa_performance
     
     if period not in ["today", "week", "month"]:
-        raise HTTPException(400, "Period must be 'today', 'week', or 'month'")
+        raise_http(400, "err.period.invalid")
     
     performance = await get_developer_qa_performance(user.user_id, period, db)
     
@@ -6103,7 +6103,7 @@ async def get_qa_developers_analytics(
     from qa_layer import get_developer_qa_performance
     
     if period not in ["today", "week", "month"]:
-        raise HTTPException(400, "Period must be 'today', 'week', or 'month'")
+        raise_http(400, "err.period.invalid")
     
     # Get all developers
     developers = await db.users.find(
@@ -6952,13 +6952,13 @@ async def admin_update_portfolio_inquiry(
     if "internal_notes" in payload:
         update_set["internal_notes"] = str(payload.get("internal_notes") or "")[:4000]
     if not update_set:
-        raise HTTPException(400, detail="No editable fields provided")
+        raise_http(400, "err.fields.no_editable")
 
     r = await db.portfolio_inquiries.update_one(
         {"inquiry_id": inquiry_id}, {"$set": update_set}
     )
     if r.matched_count == 0:
-        raise HTTPException(404, detail="Inquiry not found")
+        raise_http(404, "err.inquiry.not_found")
     doc = await db.portfolio_inquiries.find_one({"inquiry_id": inquiry_id}, {"_id": 0})
     if isinstance(doc.get("created_at"), str):
         try:
@@ -6976,7 +6976,7 @@ async def admin_delete_portfolio_inquiry(
     """Admin: Delete a portfolio inquiry."""
     r = await db.portfolio_inquiries.delete_one({"inquiry_id": inquiry_id})
     if r.deleted_count == 0:
-        raise HTTPException(404, detail="Inquiry not found")
+        raise_http(404, "err.inquiry.not_found")
     return {"ok": True, "inquiry_id": inquiry_id}
 
 
@@ -6985,7 +6985,7 @@ async def admin_get_portfolio_case(case_id: str, admin: User = Depends(require_r
     """Admin: Get a single portfolio case by id."""
     doc = await db.portfolio_cases.find_one({"case_id": case_id}, {"_id": 0})
     if not doc:
-        raise HTTPException(404, detail="Portfolio case not found")
+        raise_http(404, "err.portfolio.not_found")
     doc.setdefault("show_budget", False)
     doc.setdefault("show_description", True)
     doc.setdefault("status", "delivered")
@@ -7008,7 +7008,7 @@ async def update_portfolio_case(
     """Admin: Update portfolio case fields. Pass only fields to change."""
     existing = await db.portfolio_cases.find_one({"case_id": case_id}, {"_id": 0})
     if not existing:
-        raise HTTPException(404, detail="Portfolio case not found")
+        raise_http(404, "err.portfolio.not_found")
 
     allowed = {
         "title", "description", "client_name", "industry", "product_type",
@@ -7035,7 +7035,7 @@ async def update_portfolio_case(
         else:
             update_set[k] = v
     if not update_set:
-        raise HTTPException(400, detail="No editable fields provided")
+        raise_http(400, "err.fields.no_editable")
 
     await db.portfolio_cases.update_one({"case_id": case_id}, {"$set": update_set})
     doc = await db.portfolio_cases.find_one({"case_id": case_id}, {"_id": 0})
@@ -7057,7 +7057,7 @@ async def delete_portfolio_case(case_id: str, admin: User = Depends(require_role
     """Admin: Delete a portfolio case."""
     r = await db.portfolio_cases.delete_one({"case_id": case_id})
     if r.deleted_count == 0:
-        raise HTTPException(404, detail="Portfolio case not found")
+        raise_http(404, "err.portfolio.not_found")
     return {"ok": True, "case_id": case_id}
 
 
@@ -7082,7 +7082,7 @@ async def get_portfolio_case_detail(case_id: str):
         {"_id": 0}
     )
     if not doc:
-        raise HTTPException(404, detail="Portfolio case not found")
+        raise_http(404, "err.portfolio.not_found")
     # Backfill new-schema defaults so legacy seed docs don't 500
     doc.setdefault("show_budget", False)
     doc.setdefault("show_description", True)
@@ -7219,7 +7219,7 @@ async def get_assignment_candidates(
     # Get work unit
     work_unit = await db.work_units.find_one({"unit_id": work_unit_id}, {"_id": 0})
     if not work_unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     # Get available developers
     developers = await db.users.find(
@@ -7254,12 +7254,12 @@ async def assign_work_unit(
     # Verify work unit exists
     work_unit = await db.work_units.find_one({"unit_id": work_unit_id}, {"_id": 0})
     if not work_unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     # Verify developer exists
     developer = await db.users.find_one({"user_id": developer_id, "role": "developer"}, {"_id": 0})
     if not developer:
-        raise HTTPException(status_code=404, detail="Developer not found")
+        raise_http(404, "err.developer.not_found")
     
     # Create assignment
     assignment_doc = {
@@ -7296,12 +7296,12 @@ async def assign_best_match(
     # Get candidates
     work_unit = await db.work_units.find_one({"unit_id": work_unit_id}, {"_id": 0})
     if not work_unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     developers = await db.users.find({"role": "developer"}, {"_id": 0}).to_list(100)
     
     if not developers:
-        raise HTTPException(status_code=400, detail="No developers available")
+        raise_http(400, "err.developers.none_available")
     
     # Find best match
     best_dev = None
@@ -7313,7 +7313,7 @@ async def assign_best_match(
             best_dev = dev
     
     if not best_dev:
-        raise HTTPException(status_code=400, detail="No suitable developer found")
+        raise_http(400, "err.developer.no_suitable")
     
     # Create assignment
     assignment_doc = {
@@ -7423,7 +7423,7 @@ async def get_client_ticket(ticket_id: str, user: User = Depends(get_current_use
         {"_id": 0}
     )
     if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+        raise_http(404, "err.ticket.not_found")
     
     # Get responses
     responses = await db.ticket_responses.find(
@@ -7449,11 +7449,11 @@ async def respond_to_ticket(
         {"_id": 0}
     )
     if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+        raise_http(404, "err.ticket.not_found")
 
     text = (message or "").strip()
     if not text and not attachment_url:
-        raise HTTPException(status_code=400, detail="Empty message")
+        raise_http(400, "err.message.empty")
 
     response_doc = {
         "response_id": f"resp_{uuid.uuid4().hex[:12]}",
@@ -7503,10 +7503,10 @@ async def get_project_trust(
     # Get project trust score and risk level.
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     # Calculate confidence score
     trust_data = await calculate_project_confidence(project_id)
@@ -7552,10 +7552,10 @@ async def get_project_risks(
     # Get predictive risks for project.
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     risks = await compute_predictive_risks(project_id)
     return {"project_id": project_id, "risks": risks}
@@ -7569,10 +7569,10 @@ async def get_project_next_steps(
     # Get next steps for project.
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     steps = await get_next_steps(project_id)
     return {"project_id": project_id, "next_steps": steps}
@@ -7586,10 +7586,10 @@ async def get_project_transparency(
     # Get transparency snapshot: dev activity, QA load, next invoice.
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     snapshot = await get_transparency_snapshot(project_id)
     return {"project_id": project_id, "transparency": snapshot}
@@ -7603,10 +7603,10 @@ async def get_project_updates(
     # Get system updates including Silence Killer.
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     # Check and create silence killer update if needed
     silence_result = await maybe_create_silence_killer_update(project_id)
@@ -7666,7 +7666,7 @@ async def calculate_module_pricing(
     # Body: {urgency, elite_dev, speed_tier}
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     
     base_price = module.get("base_price") or module.get("price", 800)
     context = {
@@ -7695,7 +7695,7 @@ async def get_module_upsells(
     # Get upsell suggestions for module.
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     
     module_type = module.get("template_type", "general")
     current_price = module.get("final_price") or module.get("price", 800)
@@ -7962,7 +7962,7 @@ async def continue_to_next_milestone(
 
     invoice = await db.invoices.find_one(query, {"_id": 0}, sort=[("created_at", 1)])
     if not invoice:
-        raise HTTPException(status_code=404, detail="No milestone is ready to continue.")
+        raise_http(404, "err.milestone.none_ready")
 
     # Try real provider first; fall back to mock-paid path so DEV demos still work.
     try:
@@ -8266,7 +8266,7 @@ async def update_ticket_status(
     )
     
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+        raise_http(404, "err.ticket.not_found")
     
     return {"message": f"Status updated to {status}"}
 
@@ -8283,11 +8283,11 @@ async def admin_respond_to_ticket(
     notification to the ticket owner so the client UI updates live."""
     ticket = await db.support_tickets.find_one({"ticket_id": ticket_id}, {"_id": 0})
     if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+        raise_http(404, "err.ticket.not_found")
 
     text = (message or "").strip()
     if not text and not attachment_url:
-        raise HTTPException(status_code=400, detail="Empty message")
+        raise_http(400, "err.message.empty")
 
     response_doc = {
         "response_id": f"resp_{uuid.uuid4().hex[:12]}",
@@ -8676,7 +8676,7 @@ async def reassign_work_unit(
     # Get work unit
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     old_dev_id = unit.get("assigned_to")
     estimated_hours = unit.get("estimated_hours", 0)
@@ -8738,7 +8738,7 @@ async def force_work_unit_status(
     )
     
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     logger.info(f"FORCE STATUS: unit {unit_id} -> {new_status} by admin {admin.user_id}")
     return {"message": f"Status changed to {new_status}"}
@@ -8754,7 +8754,7 @@ async def escalate_work_unit(
     
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     ticket_doc = {
         "ticket_id": f"tkt_{uuid.uuid4().hex[:12]}",
@@ -8834,7 +8834,7 @@ async def update_system_settings(
     
     if assignment_mode is not None:
         if assignment_mode not in ["manual", "assisted", "auto"]:
-            raise HTTPException(status_code=400, detail="Invalid assignment_mode")
+            raise_http(400, "err.assignment_mode.invalid")
         update_data["assignment_mode"] = assignment_mode
     
     if alert_engine_enabled is not None:
@@ -9340,7 +9340,7 @@ async def resolve_alert(alert_id: str, admin: User = Depends(require_role("admin
     )
     
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Alert not found")
+        raise_http(404, "err.alert.not_found")
     
     return {"message": "Alert resolved"}
 
@@ -9619,10 +9619,10 @@ async def toggle_quick_mode(
     # Check if provider is eligible (score > 70)
     provider = await db.providers.find_one({"user_id": user.user_id}, {"_id": 0})
     if not provider:
-        raise HTTPException(status_code=404, detail="Provider profile not found")
+        raise_http(404, "err.provider.profile_not_found")
     
     if enabled and provider.get("behavioral_score", 0) < 70:
-        raise HTTPException(status_code=400, detail="Quick mode requires behavioral score > 70")
+        raise_http(400, "err.quick_mode.score")
     
     await db.providers.update_one(
         {"user_id": user.user_id},
@@ -9725,7 +9725,7 @@ async def accept_request(request_id: str, user: User = Depends(get_current_user)
     # Get request
     req = await db.service_requests.find_one({"request_id": request_id}, {"_id": 0})
     if not req:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise_http(404, "err.request.not_found")
     
     # Check if already taken
     if req.get("selected_provider_id"):
@@ -9733,7 +9733,7 @@ async def accept_request(request_id: str, user: User = Depends(get_current_user)
     
     # Check if provider is in distributed list
     if user.user_id not in req.get("distributed_to", []):
-        raise HTTPException(status_code=403, detail="Request not distributed to you")
+        raise_http(403, "err.request.not_distributed")
     
     now = datetime.now(timezone.utc)
     
@@ -11133,7 +11133,7 @@ async def analyze_project_with_ai(request: AIAnalysisRequest):
     active = await get_active_llm_key()
     api_key = active.get("key") or ""
     if not api_key:
-        raise HTTPException(status_code=500, detail="AI service not configured — admin must set an LLM key in /admin/integrations")
+        raise_http(500, "err.ai.not_configured", request=request)
     
     try:
         chat = LlmChat(
@@ -11209,7 +11209,7 @@ Respond with JSON only. Be realistic with hours - don't underestimate."""
             if json_match:
                 result = json.loads(json_match.group())
             else:
-                raise HTTPException(status_code=500, detail="Failed to parse AI response")
+                raise_http(500, "err.ai.parse_failed", request=request)
         
         # Ensure cost calculation with 3 tiers
         if 'features' in result:
@@ -11258,7 +11258,7 @@ async def create_validation_task(
     """Create validation task for completed work unit"""
     work_unit = await db.work_units.find_one({"unit_id": work_unit_id}, {"_id": 0})
     if not work_unit:
-        raise HTTPException(status_code=404, detail="Work unit not found")
+        raise_http(404, "err.work_unit.not_found")
     
     now = datetime.now(timezone.utc)
     validation = {
@@ -11312,7 +11312,7 @@ async def assign_validation(
         {"$set": {"assigned_to": tester_id, "status": "in_progress"}}
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Validation task not found")
+        raise_http(404, "err.validation_task.not_found")
     return {"message": "Assigned", "validation_id": validation_id}
 
 
@@ -11338,7 +11338,7 @@ async def pass_validation(
     """Mark validation as passed"""
     validation = await db.validation_tasks.find_one({"validation_id": validation_id}, {"_id": 0})
     if not validation:
-        raise HTTPException(status_code=404, detail="Validation task not found")
+        raise_http(404, "err.validation_task.not_found")
     
     now = datetime.now(timezone.utc)
     await db.validation_tasks.update_one(
@@ -11369,11 +11369,11 @@ async def fail_validation(
 ):
     """Mark validation as failed with issues"""
     if not issues:
-        raise HTTPException(status_code=400, detail="Issues required for fail")
+        raise_http(400, "err.issues.required_for_fail")
     
     validation = await db.validation_tasks.find_one({"validation_id": validation_id}, {"_id": 0})
     if not validation:
-        raise HTTPException(status_code=404, detail="Validation task not found")
+        raise_http(404, "err.validation_task.not_found")
     
     # Add issue IDs
     for i, issue in enumerate(issues):
@@ -11504,7 +11504,7 @@ async def client_pay_invoice(
     if not inv:
         raise_http(404, "err.invoice.not_found")
     if inv.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your invoice")
+        raise_http(403, "err.invoice.not_yours")
     if inv.get("status") == "paid":
         return {"ok": True, "status": "paid", "already": True}
     if inv.get("status") not in ("pending_payment", "draft", "failed"):
@@ -12117,11 +12117,11 @@ async def admin_set_module_dev_reward(
     """
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
 
     dev_reward_val = float(req.dev_reward)
     if dev_reward_val < 0:
-        raise HTTPException(status_code=400, detail="dev_reward must be >= 0")
+        raise_http(400, "err.dev_reward.positive")
 
     # Resolve client_price from module → fallback to linked invoice.
     client_price = float(
@@ -12184,7 +12184,7 @@ async def admin_get_module_economics(
     reward_source} so admin UI can render the current state."""
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     client_price = float(
         module.get("client_price")
         or module.get("price")
@@ -12225,9 +12225,9 @@ async def preview_project_payment_plans(
     the splits side-by-side without 4 round-trips. Read-only."""
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     if project.get("client_id") != user.user_id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Not your project")
+        raise_http(403, "err.project.not_yours")
 
     contract = await db.contracts.find_one({"project_id": project_id}, {"_id": 0})
     locked = bool(contract and contract.get("status") in ("signed", "active"))
@@ -12292,14 +12292,14 @@ async def set_project_payment_plan(
 
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     if project.get("client_id") != user.user_id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Not your project")
+        raise_http(403, "err.project.not_yours")
 
     # Once the contract is signed, the plan is frozen.
     contract = await db.contracts.find_one({"project_id": project_id}, {"_id": 0})
     if contract and contract.get("status") in ("signed", "active"):
-        raise HTTPException(status_code=400, detail="Contract already signed — plan locked")
+        raise_http(400, "err.contract.already_signed")
 
     await db.projects.update_one(
         {"project_id": project_id},
@@ -12362,7 +12362,7 @@ async def request_developer_withdrawal(
     """
     amount = round(float(body.get("amount") or 0), 2)
     if amount <= 0:
-        raise HTTPException(status_code=400, detail="amount must be positive")
+        raise_http(400, "err.amount.positive_required")
 
     now = datetime.now(timezone.utc)
     withdrawal_id = f"wd_{uuid.uuid4().hex[:12]}"
@@ -12530,10 +12530,10 @@ async def cancel_developer_withdrawal(
             {"withdrawal_id": withdrawal_id}, {"_id": 0}
         )
         if existing is None:
-            raise HTTPException(status_code=404, detail="Withdrawal not found")
+            raise_http(404, "err.withdrawal.not_found")
         if existing.get("user_id") != user.user_id:
             # Don't leak existence of other devs' rows — same 404.
-            raise HTTPException(status_code=404, detail="Withdrawal not found")
+            raise_http(404, "err.withdrawal.not_found")
         current_status = existing.get("status")
         if current_status == "cancelled":
             # Idempotent re-cancel: report success without emitting a
@@ -12623,7 +12623,7 @@ async def admin_approve_withdrawal(
     if res.modified_count == 0:
         cur = await db.dev_withdrawals.find_one({"withdrawal_id": withdrawal_id}, {"_id": 0})
         if not cur:
-            raise HTTPException(status_code=404, detail="Withdrawal not found")
+            raise_http(404, "err.withdrawal.not_found")
         return {"ok": True, "already": cur["status"]}
     return {"ok": True, "withdrawal_id": withdrawal_id, "status": "approved"}
 
@@ -12645,13 +12645,13 @@ async def admin_mark_withdrawal_paid(
     if res.modified_count == 0:
         cur = await db.dev_withdrawals.find_one({"withdrawal_id": withdrawal_id}, {"_id": 0})
         if not cur:
-            raise HTTPException(status_code=404, detail="Withdrawal not found")
+            raise_http(404, "err.withdrawal.not_found")
         if cur["status"] == "paid":
             return {"ok": True, "already": True}
         if cur["status"] == "rejected":
-            raise HTTPException(status_code=400, detail="Withdrawal was rejected")
+            raise_http(400, "err.withdrawal.rejected")
         if cur["status"] == "requested":
-            raise HTTPException(status_code=400, detail="Approve before paying")
+            raise_http(400, "err.approve.before_pay")
         raise HTTPException(status_code=400, detail=f"Cannot pay (status={cur['status']})")
 
     # Sole winner of the CAS — now drive the canonical payout.
@@ -12713,7 +12713,7 @@ async def admin_reject_withdrawal(
     if res.modified_count == 0:
         cur = await db.dev_withdrawals.find_one({"withdrawal_id": withdrawal_id}, {"_id": 0})
         if not cur:
-            raise HTTPException(status_code=404, detail="Withdrawal not found")
+            raise_http(404, "err.withdrawal.not_found")
         return {"ok": True, "already": cur["status"]}
 
     w = await db.dev_withdrawals.find_one({"withdrawal_id": withdrawal_id}, {"_id": 0})
@@ -12991,7 +12991,7 @@ async def simulate_dev_earning(
     earning_ref_id = body.get("earning_ref_id", f"sim_{uuid.uuid4().hex[:8]}")
 
     if not dev_id or amount <= 0:
-        raise HTTPException(status_code=400, detail="developer_id and positive amount required")
+        raise_http(400, "err.dev_amount.required")
 
     result = await process_dev_referral_payout(dev_id, amount, earning_ref_id)
     
@@ -13300,7 +13300,7 @@ async def get_project_profit_detail(
         {"_id": 0, "name": 1}
     )
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     # Revenue
     invoices = await db.invoices.find(
@@ -13689,7 +13689,7 @@ async def acknowledge_event(
     )
     
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Event not found")
+        raise_http(404, "err.event.not_found")
     
     return {"message": "Event acknowledged"}
 
@@ -13712,7 +13712,7 @@ async def resolve_event(
     )
     
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Event not found")
+        raise_http(404, "err.event.not_found")
     
     return {"message": "Event resolved"}
 
@@ -14152,7 +14152,7 @@ async def generate_scope_with_ai(
         active = await get_active_llm_key()
         llm_key = active.get("key") or ""
         if not llm_key:
-            raise HTTPException(status_code=500, detail="LLM key not configured — admin must set one in /admin/integrations")
+            raise_http(500, "err.llm.not_configured")
         
         # Initialize GPT chat
         chat = LlmChat(
@@ -14216,7 +14216,7 @@ async def generate_scope_with_ai(
         
     except json.JSONDecodeError as e:
         logger.error(f"GPT response not valid JSON: {e}")
-        raise HTTPException(status_code=500, detail="AI returned invalid format. Please try again.")
+        raise_http(500, "err.ai.invalid_format")
     except Exception as e:
         logger.error(f"GPT scope generation error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
@@ -14298,7 +14298,7 @@ async def override_proposal_price(
     """Admin overrides AI-generated price with explanation"""
     proposal = await db.proposals.find_one({"proposal_id": proposal_id}, {"_id": 0})
     if not proposal:
-        raise HTTPException(status_code=404, detail="Proposal not found")
+        raise_http(404, "err.proposal.not_found")
     
     ai_estimate = proposal.get("estimated_cost", 0)
     
@@ -14596,10 +14596,10 @@ async def execute_system_action(
     """Execute a system action (respects system mode for logging)"""
     action = await db.system_actions.find_one({"action_id": action_id}, {"_id": 0})
     if not action:
-        raise HTTPException(status_code=404, detail="Action not found")
+        raise_http(404, "err.action.not_found")
     
     if action.get("status") not in ["pending", "awaiting_manual", "blocked_requires_manual"]:
-        raise HTTPException(status_code=400, detail="Action already executed or failed")
+        raise_http(400, "err.action.already_done")
     
     # Execute via centralized function (manual override since admin clicked)
     result = await execute_action_internal(action, "manual_override")
@@ -14739,7 +14739,7 @@ async def get_scope_template(
     """Get single scope template"""
     template = await db.scope_templates.find_one({"template_id": template_id}, {"_id": 0})
     if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise_http(404, "err.template.not_found")
     return template
 
 
@@ -14752,11 +14752,11 @@ async def use_scope_template(
     """Apply template to project - creates work units"""
     template = await db.scope_templates.find_one({"template_id": template_id}, {"_id": 0})
     if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise_http(404, "err.template.not_found")
     
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     # Create work units from template tasks
     created_units = []
@@ -14803,7 +14803,7 @@ async def delete_scope_template(
     """Delete scope template"""
     result = await db.scope_templates.delete_one({"template_id": template_id})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise_http(404, "err.template.not_found")
     return {"message": "Template deleted"}
 
 
@@ -14823,7 +14823,7 @@ async def save_project_as_template(
     ).to_list(200)
     
     if not units:
-        raise HTTPException(status_code=400, detail="Project has no work units to save")
+        raise_http(400, "err.project.no_units")
     
     # Convert units to template tasks
     tasks = []
@@ -15237,7 +15237,7 @@ async def get_client_invoice(invoice_id: str, user: User = Depends(get_current_u
     if not inv:
         raise_http(404, "err.invoice.not_found")
     if inv.get("client_id") != user.user_id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Not your invoice")
+        raise_http(403, "err.invoice.not_yours")
 
     project = None
     if inv.get("project_id"):
@@ -15711,7 +15711,7 @@ async def approve_payout(payout_id: str, admin: User = Depends(require_role("adm
     """Admin: Approve accrued payout (moves from pending to available balance)"""
     payout = await db.referral_payouts.find_one({"payout_id": payout_id}, {"_id": 0})
     if not payout:
-        raise HTTPException(status_code=404, detail="Payout not found")
+        raise_http(404, "err.payout.not_found")
     
     if payout["status"] != "accrued":
         raise HTTPException(status_code=400, detail=f"Cannot approve payout in status: {payout['status']}")
@@ -15742,7 +15742,7 @@ async def cancel_payout(payout_id: str, admin: User = Depends(require_role("admi
     """Admin: Cancel payout (fraud/refund)"""
     payout = await db.referral_payouts.find_one({"payout_id": payout_id}, {"_id": 0})
     if not payout:
-        raise HTTPException(status_code=404, detail="Payout not found")
+        raise_http(404, "err.payout.not_found")
     
     old_status = payout["status"]
     await db.referral_payouts.update_one(
@@ -15894,11 +15894,11 @@ async def get_project_contract(project_id: str, user: User = Depends(get_current
     client's own project. UI renders this JSON directly — no aggregation."""
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     if project.get("client_id") != user.user_id and "admin" not in (
         (await db.users.find_one({"user_id": user.user_id}, {"_id": 0, "states": 1}) or {}).get("states") or []
     ):
-        raise HTTPException(status_code=403, detail="Not your project")
+        raise_http(403, "err.project.not_yours")
 
     contract = await _ensure_contract_for_project(project, user.user_id)
 
@@ -15916,18 +15916,18 @@ async def sign_contract(contract_id: str, body: ContractSignBody, request: Reque
     On success: contract.status → signed, project.status → active,
     notification fired, billing/module_motion gated downstream by project status."""
     if not body.accepted:
-        raise HTTPException(status_code=400, detail="You must accept the terms to sign")
+        raise_http(400, "err.auth.terms_required", request=request)
 
     contract = await db.contracts.find_one({"contract_id": contract_id}, {"_id": 0})
     if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+        raise_http(404, "err.contract.not_found", request=request)
     if contract.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your contract")
+        raise_http(403, "err.contract.not_yours", request=request)
 
     # Idempotent: already signed → just return the current view.
     project = await db.projects.find_one({"project_id": contract["project_id"]}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found", request=request)
 
     if contract.get("status") in ("signed", "active"):
         # Re-shape and return — no double-fire.
@@ -16086,7 +16086,7 @@ async def admin_list_contracts(
     """List all contracts, newest first. Operator filters happen client-side."""
     db_user = await db.users.find_one({"user_id": user.user_id}, {"_id": 0, "states": 1, "role": 1})
     if "admin" not in (db_user or {}).get("states", []):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise_http(403, "err.admin.only")
 
     q: dict = {}
     if status and status != "all":
@@ -16122,11 +16122,11 @@ async def admin_contract_detail(contract_id: str, user: User = Depends(get_curre
     """Full contract detail for admin — includes signature audit trail."""
     db_user = await db.users.find_one({"user_id": user.user_id}, {"_id": 0, "states": 1})
     if "admin" not in (db_user or {}).get("states", []):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise_http(403, "err.admin.only")
 
     contract = await db.contracts.find_one({"contract_id": contract_id}, {"_id": 0})
     if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+        raise_http(404, "err.contract.not_found")
 
     project = await db.projects.find_one({"project_id": contract["project_id"]}, {"_id": 0})
     client = await db.users.find_one({"user_id": contract.get("client_id")}, {"_id": 0, "name": 1, "email": 1, "user_id": 1})
@@ -16562,7 +16562,7 @@ async def get_dev_growth_link(user: User = Depends(require_role("developer", "ad
 async def bind_dev_referral(body: BindReferralRequest, user: User = Depends(get_current_user)):
     """Bind a developer referral code to the current user"""
     if user.role not in ["developer", "tester"]:
-        raise HTTPException(status_code=400, detail="Only developers/testers can be referred in dev growth program")
+        raise_http(400, "err.referral.dev_only")
 
     link = await db.referral_links.find_one({
         "code": body.referral_code,
@@ -17153,7 +17153,7 @@ async def approve_learning_candidate(
     """Approve a template candidate — creates a new scope template"""
     candidate = await db.template_candidates.find_one({"candidate_id": candidate_id}, {"_id": 0})
     if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+        raise_http(404, "err.candidate.not_found", request=request)
     
     if candidate["status"] != "pending_review":
         raise HTTPException(status_code=400, detail=f"Candidate already reviewed ({candidate['status']})")
@@ -17245,7 +17245,7 @@ async def ignore_learning_candidate(
     """Ignore a template candidate"""
     candidate = await db.template_candidates.find_one({"candidate_id": candidate_id}, {"_id": 0})
     if not candidate:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+        raise_http(404, "err.candidate.not_found", request=request)
     
     body = await request.json()
     
@@ -17472,7 +17472,7 @@ async def match_template(
     """Match client idea against existing templates. Returns top 3 matches."""
     idea = body.idea.strip()
     if not idea:
-        raise HTTPException(status_code=400, detail="Idea text is required")
+        raise_http(400, "err.idea.required", request=request)
     
     try:
         idea_embedding = await create_embedding(idea)
@@ -17537,7 +17537,7 @@ async def generate_scope_endpoint(
     """Hybrid generation: use template if provided, otherwise generate from scratch"""
     idea = body.idea.strip()
     if not idea:
-        raise HTTPException(status_code=400, detail="Idea text is required")
+        raise_http(400, "err.idea.required")
     
     template = None
     generation_mode = "from_scratch"
@@ -17595,14 +17595,14 @@ async def estimate_price_from_idea(
     """Data-driven pricing: match template + historical data → recommended price with explainability"""
     idea = body.idea.strip()
     if not idea:
-        raise HTTPException(status_code=400, detail="Idea is required")
+        raise_http(400, "err.idea.required")
     
     # Create embedding for the idea
     try:
         idea_embedding = await create_embedding(idea)
     except Exception as e:
         logger.error(f"Embedding error in pricing: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process idea")
+        raise_http(500, "err.idea.process_failed")
     
     # Get all templates with embeddings
     templates = await db.scope_templates.find(
@@ -17820,7 +17820,7 @@ async def create_template_manually(
     tech_stack = body.get("tech_stack", [])
     
     if not name:
-        raise HTTPException(status_code=400, detail="Template name is required")
+        raise_http(400, "err.template.name_required", request=request)
     
     # Create embedding from name + description + task titles
     embed_text = f"{name}. {description}. " + " ".join([t.get("title", "") for t in tasks])
@@ -17866,7 +17866,7 @@ async def create_template_from_project(
         {"_id": 0}
     )
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     # Get project work units for tasks
     work_units = await db.work_units.find(
@@ -17938,7 +17938,7 @@ async def delete_template(
     """Delete a scope template"""
     result = await db.scope_templates.delete_one({"template_id": template_id})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise_http(404, "err.template.not_found")
     return {"message": "Template deleted", "template_id": template_id}
 
 
@@ -17965,7 +17965,7 @@ async def set_system_mode_endpoint(
     mode = body.get("mode")
     
     if mode not in ["manual", "assisted", "auto"]:
-        raise HTTPException(status_code=400, detail="Invalid mode. Must be: manual, assisted, auto")
+        raise_http(400, "err.mode.invalid_maa", request=request)
     
     now = datetime.now(timezone.utc)
     await db.system_config.update_one(
@@ -18025,11 +18025,11 @@ async def execute_action_with_mode(
     action_id = body.get("action_id")
     
     if not action_id:
-        raise HTTPException(status_code=400, detail="action_id required")
+        raise_http(400, "err.action_id.required", request=request)
     
     action = await db.system_actions.find_one({"action_id": action_id}, {"_id": 0})
     if not action:
-        raise HTTPException(status_code=404, detail="Action not found")
+        raise_http(404, "err.action.not_found", request=request)
     
     if action.get("status") not in ["pending", "awaiting_manual", "blocked_requires_manual"]:
         raise HTTPException(status_code=400, detail=f"Action not executable. Status: {action.get('status')}")
@@ -18401,7 +18401,7 @@ async def mark_notification_read(notification_id: str, user: User = Depends(get_
         {"$set": {"is_read": True, "read": True}}
     )
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Notification not found")
+        raise_http(404, "err.notification.not_found")
     return {"ok": True}
 
 
@@ -18841,7 +18841,7 @@ async def dev_start_task(unit_id: str, user: User = Depends(require_role("develo
         }}
     )
     if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Cannot start this task")
+        raise_http(400, "err.task.cannot_start")
     
     await realtime.emit_to_user(user.user_id, "task.started", {"unit_id": unit_id})
     return {"message": "Task started", "unit_id": unit_id}
@@ -18852,11 +18852,11 @@ async def dev_submit_task(unit_id: str, body: dict = Body({}), user: User = Depe
     """Developer: Submit task for review (in_progress -> review)"""
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_http(404, "err.task.not_found")
     if unit.get("status") not in ["in_progress", "revision"]:
         raise HTTPException(status_code=400, detail=f"Cannot submit from status: {unit.get('status')}")
     if unit.get("assigned_to") != user.user_id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Not your task")
+        raise_http(403, "err.task.not_yours")
 
     # Calculate time if timer was running
     timer_start = unit.get("timer_started_at")
@@ -18940,11 +18940,11 @@ async def dev_fix_task(unit_id: str, body: dict = Body({}), user: User = Depends
     """Developer: Resubmit fixed task (revision -> review)"""
     unit = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not unit:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_http(404, "err.task.not_found")
     if unit.get("status") != "revision":
-        raise HTTPException(status_code=400, detail="Task is not in revision status")
+        raise_http(400, "err.task.not_in_revision")
     if unit.get("assigned_to") != user.user_id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Not your task")
+        raise_http(403, "err.task.not_yours")
 
     submission_doc = {
         "submission_id": f"sub_{uuid.uuid4().hex[:12]}",
@@ -18980,7 +18980,7 @@ async def dev_start_timer(unit_id: str, user: User = Depends(require_role("devel
         {"$set": {"timer_started_at": datetime.now(timezone.utc).isoformat()}}
     )
     if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Cannot start timer")
+        raise_http(400, "err.timer.cannot_start")
     return {"message": "Timer started"}
 
 
@@ -18992,7 +18992,7 @@ async def dev_stop_timer(unit_id: str, user: User = Depends(require_role("develo
         {"_id": 0}
     )
     if not unit or not unit.get("timer_started_at"):
-        raise HTTPException(status_code=400, detail="No timer running")
+        raise_http(400, "err.timer.not_running")
 
     timer_start = unit["timer_started_at"]
     if isinstance(timer_start, str):
@@ -19036,7 +19036,7 @@ async def get_client_project_full(project_id: str, user: User = Depends(get_curr
         # Maybe it's a request_id (pre-project stage)
         request_doc = await db.requests.find_one({"request_id": project_id}, {"_id": 0})
         if not request_doc:
-            raise HTTPException(status_code=404, detail="Project not found")
+            raise_http(404, "err.project.not_found")
         
         # Build a virtual project from request
         status_map = {
@@ -19075,7 +19075,7 @@ async def get_client_project_full(project_id: str, user: User = Depends(get_curr
     
     # Ownership check
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
 
     # Determine stage
     current_stage = project.get("current_stage", "development")
@@ -19266,7 +19266,7 @@ async def approve_dev_payout_batch(batch_id: str, admin: User = Depends(require_
     """Admin: Approve payout batch — marks all tasks as paid"""
     batch = await db.dev_payout_batches.find_one({"batch_id": batch_id}, {"_id": 0})
     if not batch:
-        raise HTTPException(status_code=404, detail="Batch not found")
+        raise_http(404, "err.batch.not_found")
     if batch.get("status") != "pending":
         raise HTTPException(status_code=400, detail=f"Batch already {batch.get('status')}")
     
@@ -19385,14 +19385,14 @@ async def client_pay_deliverable(deliverable_id: str, user: User = Depends(get_c
     """Client: Initiate payment for a locked deliverable via WayForPay"""
     deliverable = await db.deliverables.find_one({"deliverable_id": deliverable_id}, {"_id": 0})
     if not deliverable:
-        raise HTTPException(status_code=404, detail="Deliverable not found")
+        raise_http(404, "err.deliverable.not_found")
     
     # Verify ownership
     project = await db.projects.find_one({"project_id": deliverable["project_id"]}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     # Check deliverable is payable
     if deliverable.get("status") not in ["pending_payment", "pending"]:
@@ -19400,7 +19400,7 @@ async def client_pay_deliverable(deliverable_id: str, user: User = Depends(get_c
     
     price = deliverable.get("price")
     if not price or price <= 0:
-        raise HTTPException(status_code=400, detail="Deliverable has no price set")
+        raise_http(400, "err.deliverable.no_price")
     
     now = datetime.now(timezone.utc)
     
@@ -19475,13 +19475,13 @@ async def simulate_deliverable_payment(deliverable_id: str, user: User = Depends
     """Client: Simulate payment for testing (marks deliverable as paid and unlocked)"""
     deliverable = await db.deliverables.find_one({"deliverable_id": deliverable_id}, {"_id": 0})
     if not deliverable:
-        raise HTTPException(status_code=404, detail="Deliverable not found")
+        raise_http(404, "err.deliverable.not_found")
     
     project = await db.projects.find_one({"project_id": deliverable["project_id"]}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
     
     now = datetime.now(timezone.utc)
     
@@ -19746,7 +19746,7 @@ async def flag_provider(
         }}
     )
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Provider not found")
+        raise_http(404, "err.provider.not_found")
     
     logger.info(f"QA FLAG: provider {body.provider_id} flagged by {admin.user_id}")
     return {"message": "Provider flagged", "provider_id": body.provider_id}
@@ -19768,7 +19768,7 @@ async def limit_provider(
         }}
     )
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Provider not found")
+        raise_http(404, "err.provider.not_found")
     
     logger.info(f"QA LIMIT: provider {body.provider_id} limited by {admin.user_id}")
     return {"message": "Provider limited", "provider_id": body.provider_id}
@@ -19797,7 +19797,7 @@ async def unlimit_provider(
         }}
     )
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Provider not found")
+        raise_http(404, "err.provider.not_found")
     
     return {"message": "Provider restrictions removed", "provider_id": body.provider_id}
 
@@ -19970,7 +19970,7 @@ async def suggest_assignment(
     # Get task
     task = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_http(404, "err.task.not_found")
     
     # Get all active developers
     developers = await db.users.find(
@@ -20017,12 +20017,12 @@ async def execute_assignment(
     # Get task
     task = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_http(404, "err.task.not_found")
     
     # Get developer
     developer = await db.users.find_one({"user_id": developer_id}, {"_id": 0})
     if not developer:
-        raise HTTPException(status_code=404, detail="Developer not found")
+        raise_http(404, "err.developer.not_found")
     
     # Update task
     await db.work_units.update_one(
@@ -20355,10 +20355,10 @@ async def accept_task(
     """
     task = await db.work_units.find_one({"unit_id": unit_id}, {"_id": 0})
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_http(404, "err.task.not_found")
     
     if task.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not assigned to you")
+        raise_http(403, "err.task.not_assigned")
     
     if accept:
         # Accept task
@@ -20415,11 +20415,11 @@ async def accept_task_endpoint(
     # Get task
     task = await db.work_units.find_one({"unit_id": task_id}, {"_id": 0})
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_http(404, "err.task.not_found")
     
     # Check assigned to user
     if task.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Task not assigned to you")
+        raise_http(403, "err.task.not_assigned_to_you")
     
     # Check status
     if task.get("status") not in [STATUS_ASSIGNED_WAITING_RESPONSE, "assigned"]:
@@ -20464,11 +20464,11 @@ async def decline_task_endpoint(
     # Get task
     task = await db.work_units.find_one({"unit_id": task_id}, {"_id": 0})
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_http(404, "err.task.not_found")
     
     # Check assigned to user
     if task.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Task not assigned to you")
+        raise_http(403, "err.task.not_assigned_to_you")
     
     # Get developer data + current load
     developer = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
@@ -20551,11 +20551,11 @@ async def request_clarification_endpoint(
     # Get task
     task = await db.work_units.find_one({"unit_id": task_id}, {"_id": 0})
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_http(404, "err.task.not_found")
     
     # Check assigned to user
     if task.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Task not assigned to you")
+        raise_http(403, "err.task.not_assigned_to_you")
     
     # Get developer data
     developer = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
@@ -20928,7 +20928,7 @@ async def stop_timer_endpoint(
         
     except Exception as e:
         logger.error(f"Error stopping timer: {e}")
-        raise HTTPException(status_code=500, detail="Failed to stop timer")
+        raise_http(500, "err.timer.stop_failed")
 
 
 @api_router.get("/developer/time-logs")
@@ -20991,11 +20991,11 @@ async def get_task_time_logs_endpoint(
     # Get task to check ownership
     task = await db.work_units.find_one({"unit_id": task_id}, {"_id": 0})
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_http(404, "err.task.not_found")
     
     # Allow if assigned to user or if admin/tester
     if task.get("assigned_to") != user.user_id and user.role not in ["admin", "tester"]:
-        raise HTTPException(status_code=403, detail="Not authorized to view this task's time logs")
+        raise_http(403, "err.auth.not_authorized_time_logs")
     
     # Get logs
     logs = await get_task_time_logs(task_id, db, limit=100)
@@ -21232,10 +21232,10 @@ async def get_developers_trust_ranking(
     from time_tracking_layer import get_developer_time_trust_summary
     
     if period not in ["today", "week", "month"]:
-        raise HTTPException(400, "Period must be 'today', 'week', or 'month'")
+        raise_http(400, "err.period.invalid")
     
     if sort_by not in ["suspicious_score", "confidence_score", "manual_ratio", "hours"]:
-        raise HTTPException(400, "Invalid sort_by parameter")
+        raise_http(400, "err.sort.invalid")
     
     # Get all developers
     developers = await db.users.find(
@@ -21308,7 +21308,7 @@ async def get_developers_trust_ranking(
     from time_tracking_layer import get_developer_time_trust_summary
     
     if period not in ["today", "week", "month"]:
-        raise HTTPException(400, "Period must be 'today', 'week', or 'month'")
+        raise_http(400, "err.period.invalid")
     
     summary = await get_developer_time_trust_summary(user.user_id, period=period, db=db)
     return summary
@@ -21348,7 +21348,7 @@ async def get_project_war_room(
     # Get project
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     # Get client
     client = await db.users.find_one({"user_id": project.get("client_id")}, {"_id": 0})
@@ -21602,7 +21602,7 @@ async def get_developer_profile(
     # Get developer
     developer = await db.users.find_one({"user_id": developer_id}, {"_id": 0})
     if not developer:
-        raise HTTPException(status_code=404, detail="Developer not found")
+        raise_http(404, "err.developer.not_found")
     
     # Get all tasks
     all_tasks = await db.work_units.find({"assigned_to": developer_id}, {"_id": 0}).to_list(500)
@@ -21800,7 +21800,7 @@ async def suggest_developers(
     
     task = await db.work_units.find_one({"unit_id": task_id}, {"_id": 0})
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_http(404, "err.task.not_found")
     
     suggestions = await suggest_developers_for_task(db, task, limit=5)
     
@@ -22031,10 +22031,10 @@ async def accept_module(
     # Get module
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     
     if module.get("status") != "open":
-        raise HTTPException(status_code=400, detail="Module not available")
+        raise_http(400, "err.module.not_available")
 
     # Production rule: dev_reward must be set and valid before assignment.
     _assert_dev_reward_valid(module, action="assign")
@@ -22046,7 +22046,7 @@ async def accept_module(
     })
     
     if active_modules >= 2:
-        raise HTTPException(status_code=400, detail="Maximum capacity reached (2 modules)")
+        raise_http(400, "err.capacity.max")
     
     # Accept module
     now = datetime.now(timezone.utc)
@@ -22079,13 +22079,13 @@ async def start_module(
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     
     if module.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your module")
+        raise_http(403, "err.module.not_yours")
     
     if module.get("status") != "reserved":
-        raise HTTPException(status_code=400, detail="Module not reserved")
+        raise_http(400, "err.module.not_reserved")
     
     # Start module
     await db.modules.update_one(
@@ -22113,11 +22113,11 @@ async def release_module(
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     
     # Check permissions
     if user.role != "admin" and module.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise_http(403, "err.auth.not_authorized")
     
     # Release module
     await db.modules.update_one(
@@ -22171,17 +22171,17 @@ async def submit_module(
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     
     if module.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your module")
+        raise_http(403, "err.module.not_yours")
     
     if module.get("status") not in ["reserved", "in_progress"]:
-        raise HTTPException(status_code=400, detail="Module cannot be submitted in current status")
+        raise_http(400, "err.module.cannot_submit")
     
     deliverable_url = body.get("deliverable_url", "").strip()
     if not deliverable_url:
-        raise HTTPException(status_code=400, detail="deliverable_url is required")
+        raise_http(400, "err.deliverable.url_required")
     
     # Update module to qa_review
     now = datetime.now(timezone.utc)
@@ -22284,7 +22284,7 @@ async def decompose_project_into_modules(
     # Get project
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     project_type = decompose_request.get("project_type", "custom")
     custom_modules = decompose_request.get("custom_modules", [])
@@ -22293,7 +22293,7 @@ async def decompose_project_into_modules(
     module_specs = decompose_project(project_type, custom_modules)
     
     if len(module_specs) == 0:
-        raise HTTPException(status_code=400, detail="Failed to generate modules")
+        raise_http(400, "err.modules.generate_failed")
     
     # Create modules in DB
     created_modules = []
@@ -22451,11 +22451,11 @@ async def set_module_assignment_mode(
     """
     mode = (body or {}).get("mode")
     if mode not in ("manual", "auto"):
-        raise HTTPException(status_code=400, detail="mode must be 'manual' or 'auto'")
+        raise_http(400, "err.mode.invalid_ma")
 
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
 
     prev = module.get("assignment_mode", "auto")
     if prev == mode:
@@ -22497,7 +22497,7 @@ async def get_module_assignment_mode(
     """Admin: read current L1/L2 state of a module."""
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     return {
         "module_id": module_id,
         "mode": module.get("assignment_mode", "auto"),
@@ -22547,11 +22547,11 @@ async def set_project_production_mode(
     """
     mode = (body or {}).get("mode")
     if mode not in ("ai", "hybrid", "dev"):
-        raise HTTPException(status_code=400, detail="mode must be 'ai', 'hybrid' or 'dev'")
+        raise_http(400, "err.mode.invalid_ahd")
 
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
 
     prev = project.get("production_mode", "hybrid")
     if prev == mode:
@@ -22596,7 +22596,7 @@ async def get_project_production_mode(
     """Admin: read current production mode of a project."""
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     mode = project.get("production_mode", "hybrid")
     return {
         "project_id": project_id,
@@ -23091,7 +23091,7 @@ async def get_client_activity_full(
     if project_id:
         target = next((p for p in own_projects if p["project_id"] == project_id), None)
         if not target:
-            raise HTTPException(status_code=404, detail="Project not found or not yours")
+            raise_http(404, "err.project.not_found_or_not_yours")
     if not target:
         target = next((p for p in own_projects if (p.get("status") or "active") == "active"), None) \
                  or own_projects[0]
@@ -23362,7 +23362,7 @@ async def set_context(body: dict, user: User = Depends(get_current_user)):
     """L0: switch active UI context. Must be a state the user already owns."""
     ctx = (body or {}).get("context")
     if ctx not in _VALID_STATES:
-        raise HTTPException(status_code=400, detail="context must be client|developer|admin")
+        raise_http(400, "err.context.invalid")
     db_user = await db.users.find_one({"user_id": user.user_id}, {"_id": 0}) or {}
     states = db_user.get("states") or []
     if ctx not in states:
@@ -23417,7 +23417,7 @@ async def l0_create_project(body: L0ProjectCreate, user: User = Depends(get_curr
     from decomposition_engine import decompose_project
     pricing_cfg = await get_pricing_config(db)
     if body.mode not in pricing_cfg["modes"]:
-        raise HTTPException(status_code=400, detail="mode must be 'ai', 'hybrid' or 'dev'")
+        raise_http(400, "err.mode.invalid_ahd")
     base_estimate = estimate_base_price(body.goal, pricing_cfg)
     pricing = calculate_project_pricing(base_estimate, body.mode, pricing_cfg)
 
@@ -23766,7 +23766,7 @@ async def admin_reprice_preview(
     )
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     pricing_cfg = await get_pricing_config(db)
     mode = project.get("production_mode") or "hybrid"
     if mode not in pricing_cfg["modes"]:
@@ -23828,7 +23828,7 @@ async def admin_reprice_commit(
     )
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     pricing_cfg = await get_pricing_config(db)
     mode = project.get("production_mode") or "hybrid"
     if mode not in pricing_cfg["modes"]:
@@ -24001,7 +24001,7 @@ async def put_pricing_config_endpoint(
     patch: dict = {}
     if payload.base_hourly_rate is not None:
         if not (0 < payload.base_hourly_rate <= 5000):
-            raise HTTPException(status_code=400, detail="base_hourly_rate must be > 0 and ≤ 5000")
+            raise_http(400, "err.rate.out_of_range")
         patch["base_hourly_rate"] = float(payload.base_hourly_rate)
 
     if payload.modes:
@@ -24080,7 +24080,7 @@ async def put_pricing_config_endpoint(
             patch["reality_layer"] = rl_patch
 
     if not patch:
-        raise HTTPException(status_code=400, detail="No fields to update")
+        raise_http(400, "err.fields.no_update")
 
     now_iso = datetime.now(timezone.utc).isoformat()
     patch["updated_at"] = now_iso
@@ -24727,7 +24727,7 @@ async def list_anonymous_leads(
     by `status` (new | contacted | converted | archived). Used by web admin
     cockpit and mobile admin_mobile screens to follow up with prospects."""
     if user.role != "admin":
-        raise HTTPException(status_code=403, detail="admin only")
+        raise_http(403, "err.admin.only")
     q: dict = {}
     if status:
         q["status"] = status
@@ -24755,7 +24755,7 @@ async def update_anonymous_lead(
 ):
     """Admin updates lead status / notes (e.g. mark 'contacted' after outreach)."""
     if user.role != "admin":
-        raise HTTPException(status_code=403, detail="admin only")
+        raise_http(403, "err.admin.only")
     update: dict = {}
     if payload.status in {"new", "contacted", "converted", "archived"}:
         update["status"] = payload.status
@@ -24764,10 +24764,10 @@ async def update_anonymous_lead(
     if payload.admin_notes is not None:
         update["admin_notes"] = payload.admin_notes[:2000]
     if not update:
-        raise HTTPException(status_code=400, detail="no valid fields to update")
+        raise_http(400, "err.fields.no_valid")
     res = await db.anonymous_leads.update_one({"lead_id": lead_id}, {"$set": update})
     if res.matched_count == 0:
-        raise HTTPException(status_code=404, detail="lead not found")
+        raise_http(404, "err.lead.not_found")
     doc = await db.anonymous_leads.find_one({"lead_id": lead_id}, {"_id": 0})
     return doc
 
@@ -24786,7 +24786,7 @@ async def claim_anonymous_lead(
     """
     lead = await db.anonymous_leads.find_one({"lead_id": lead_id}, {"_id": 0})
     if not lead:
-        raise HTTPException(status_code=404, detail="lead not found")
+        raise_http(404, "err.lead.not_found")
 
     # Idempotency — if already claimed by this user, return existing project.
     if lead.get("status") == "converted":
@@ -24796,7 +24796,7 @@ async def claim_anonymous_lead(
                 "lead": lead,
                 "already_claimed": True,
             }
-        raise HTTPException(status_code=409, detail="lead already claimed by another user")
+        raise_http(409, "err.lead.already_claimed")
 
     now = datetime.now(timezone.utc)
     project_id = f"proj_{uuid.uuid4().hex[:12]}"
@@ -24899,7 +24899,7 @@ async def get_module(module_id: str, user: User = Depends(get_current_user)):
     from module_execution import next_allowed
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="module not found")
+        raise_http(404, "err.module.not_found")
     module["next_allowed"] = next_allowed(module.get("status"))
     return module
 
@@ -24946,14 +24946,14 @@ async def module_qa_decision(
     # Get module
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     
     if module.get("status") != "review":
-        raise HTTPException(status_code=400, detail="Module must be in review status")
+        raise_http(400, "err.module.not_in_review")
     
     dev_id = module.get("assigned_to")
     if not dev_id:
-        raise HTTPException(status_code=400, detail="Module has no assigned developer")
+        raise_http(400, "err.module.no_developer")
     
     now = datetime.now(timezone.utc)
     decision_type = decision.decision.lower()
@@ -25129,7 +25129,7 @@ async def module_qa_decision(
         }
     
     else:
-        raise HTTPException(status_code=400, detail="Invalid decision. Use: pass, revision, or fail")
+        raise_http(400, "err.decision.invalid")
 
 
 @api_router.post("/marketplace/modules/{module_id}/drop")
@@ -25149,13 +25149,13 @@ async def drop_module(
     # Get module
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     
     if module.get("assigned_to") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your module")
+        raise_http(403, "err.module.not_yours")
     
     if module.get("status") == "done":
-        raise HTTPException(status_code=400, detail="Cannot drop completed module")
+        raise_http(400, "err.module.cannot_drop_completed")
     
     now = datetime.now(timezone.utc)
     
@@ -25426,7 +25426,7 @@ async def get_developer_quality_score(
     
     dev = await db.users.find_one({"user_id": developer_id}, {"_id": 0})
     if not dev:
-        raise HTTPException(status_code=404, detail="Developer not found")
+        raise_http(404, "err.developer.not_found")
     
     # Get detailed module breakdown
     modules = await db.modules.find({
@@ -25620,13 +25620,13 @@ async def add_expansion_module(
     """
     item = EXPANSION_CATALOG.get(body.slug)
     if not item:
-        raise HTTPException(status_code=400, detail="Unknown module slug")
+        raise_http(400, "err.module.slug_unknown")
 
     project = await db.projects.find_one({"project_id": project_id}, {"_id": 0})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     if user.role == "client" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise_http(403, "err.access.denied")
 
     now_iso = datetime.now(timezone.utc).isoformat()
     module_id = f"mod_{uuid.uuid4().hex[:12]}"
@@ -25708,14 +25708,14 @@ class ClientModuleFeedback(BaseModel):
 async def _assert_module_owner(module_id: str, user: User) -> Dict[str, Any]:
     module = await db.modules.find_one({"module_id": module_id}, {"_id": 0})
     if not module:
-        raise HTTPException(status_code=404, detail="Module not found")
+        raise_http(404, "err.module.not_found")
     project = await db.projects.find_one(
         {"project_id": module.get("project_id")}, {"_id": 0}
     )
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     if user.role != "admin" and project.get("client_id") != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your module")
+        raise_http(403, "err.module.not_yours")
     return module
 
 
@@ -25993,7 +25993,7 @@ async def client_deposit_checkout(
         {"project_id": project_id, "client_id": user.user_id}, {"_id": 0}
     )
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
 
     if project.get("status") != "awaiting_deposit":
         raise HTTPException(
@@ -26009,7 +26009,7 @@ async def client_deposit_checkout(
 
     deposit_amount = float(project.get("deposit_amount") or 0)
     if deposit_amount <= 0:
-        raise HTTPException(status_code=400, detail="No deposit amount on project")
+        raise_http(400, "err.project.no_deposit")
 
     # Idempotency — reuse an existing draft deposit invoice if one exists.
     existing = await db.invoices.find_one(
@@ -26159,7 +26159,7 @@ async def client_subscribe(
     """Mocked subscribe — flips a flag on the user. Real Stripe checkout
     would replace this once a key is provided."""
     if body.slug != "none" and not any(p["slug"] == body.slug for p in PRICING_PLANS):
-        raise HTTPException(status_code=400, detail="Unknown plan")
+        raise_http(400, "err.plan.unknown")
     now_iso = datetime.now(timezone.utc).isoformat()
     update: Dict[str, Any] = {"subscription_plan": body.slug}
     if body.slug != "none":
@@ -26509,9 +26509,9 @@ async def chat_upload_attachment(
 ):
     kind = (body.kind or "").strip().lower()
     if kind not in _EXT_BY_KIND:
-        raise HTTPException(status_code=400, detail="invalid kind")
+        raise_http(400, "err.kind.invalid")
     if not body.data_url or "," not in body.data_url:
-        raise HTTPException(status_code=400, detail="data_url must be a data: URL")
+        raise_http(400, "err.data_url.invalid")
 
     # Parse `data:<mime>;base64,<payload>`. We don't trust the mime — we re-derive
     # the extension from the supplied filename and validate against the kind.
@@ -26519,7 +26519,7 @@ async def chat_upload_attachment(
         header, payload = body.data_url.split(",", 1)
         raw = _b64.b64decode(payload, validate=False)
     except Exception:
-        raise HTTPException(status_code=400, detail="invalid base64 payload")
+        raise_http(400, "err.base64.invalid")
     if len(raw) > _MAX_ATTACHMENT_BYTES:
         raise HTTPException(status_code=413, detail=f"file too large (max {_MAX_ATTACHMENT_BYTES // (1024*1024)}MB)")
 
@@ -26586,7 +26586,7 @@ async def serve_chat_upload(user_id: str, filename: str):
     the upload endpoint returns its CDN URL directly and this route is unused.
     """
     if "/" in filename or ".." in filename or "/" in user_id or ".." in user_id:
-        raise HTTPException(status_code=400, detail="Invalid path")
+        raise_http(400, "err.path.invalid")
     from fastapi.responses import FileResponse as _FR  # local import to avoid top-level coupling
     path = _CHAT_UPLOADS_DIR / user_id / filename
     if not path.exists():
@@ -26700,7 +26700,7 @@ async def chat_post(
     # Accept attachment-only messages (e.g. a screenshot with no caption).
     has_attachment = bool(body.attachment_url)
     if not text and not has_attachment:
-        raise HTTPException(status_code=400, detail="Empty message")
+        raise_http(400, "err.message.empty")
 
     pid = body.project_id or None
     route = "project" if pid else "support"
@@ -26868,10 +26868,10 @@ async def admin_messages_reply(
     """Admin replies inside a thread. Visible to the client via /chat/thread."""
     text = (body.text or "").strip()
     if not text:
-        raise HTTPException(status_code=400, detail="Empty reply")
+        raise_http(400, "err.reply.empty")
     thread = await db.message_threads.find_one({"thread_id": thread_id}, {"_id": 0})
     if not thread:
-        raise HTTPException(status_code=404, detail="Thread not found")
+        raise_http(404, "err.thread.not_found")
 
     reply = {
         "id": f"msg_admin_{uuid.uuid4().hex[:12]}",
@@ -27440,7 +27440,7 @@ async def stripe_status(session_id: str, request: Request):
     cfg = await _admin_integ.get_setting("stripe")
     secret = (cfg.get("secret_key") or "").strip()
     if not secret:
-        raise HTTPException(status_code=503, detail="stripe_not_configured")
+        raise_http(503, "err.stripe.not_configured", request=request)
     try:
         from emergentintegrations.payments.stripe.checkout import StripeCheckout
         host_url = str(request.base_url)
@@ -27893,15 +27893,15 @@ class ChangeRequestPropose(BaseModel):
 async def create_change_request(req: ChangeRequestCreate, user: User = Depends(get_current_user)):
     # Client creates CR for scope changes
     if user.role != "client":
-        raise HTTPException(status_code=403, detail="Client access only")
+        raise_http(403, "err.client.access_only")
     
     project = await db.projects.find_one({"project_id": req.project_id, "client_id": user.user_id})
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise_http(404, "err.project.not_found")
     
     contract = await db.contracts.find_one({"project_id": req.project_id})
     if not contract:
-        raise HTTPException(status_code=404, detail="No contract for this project")
+        raise_http(404, "err.contract.not_found_for_project")
     
     cr_id = f"cr_{uuid.uuid4().hex[:12]}"
     cr_doc = {
@@ -27932,14 +27932,14 @@ async def create_change_request(req: ChangeRequestCreate, user: User = Depends(g
 async def propose_change_request(cr_id: str, req: ChangeRequestPropose, user: User = Depends(get_current_user)):
     # Admin sets price and timeline delta
     if user.role not in ["admin"]:
-        raise HTTPException(status_code=403, detail="Admin access only")
+        raise_http(403, "err.admin.access_only")
     
     cr = await db.change_requests.find_one({"change_request_id": cr_id})
     if not cr:
-        raise HTTPException(status_code=404, detail="CR not found")
+        raise_http(404, "err.cr.not_found")
     
     if cr["status"] != "submitted":
-        raise HTTPException(status_code=400, detail="CR must be in submitted status")
+        raise_http(400, "err.cr.not_submitted")
     
     await db.change_requests.update_one(
         {"change_request_id": cr_id},
@@ -27963,21 +27963,21 @@ async def propose_change_request(cr_id: str, req: ChangeRequestPropose, user: Us
 async def approve_change_request(cr_id: str, user: User = Depends(get_current_user)):
     # Client approves CR - triggers contract update + invoice creation
     if user.role != "client":
-        raise HTTPException(status_code=403, detail="Client access only")
+        raise_http(403, "err.client.access_only")
     
     cr = await db.change_requests.find_one({"change_request_id": cr_id})
     if not cr:
-        raise HTTPException(status_code=404, detail="CR not found")
+        raise_http(404, "err.cr.not_found")
     
     if cr["requested_by"] != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your CR")
+        raise_http(403, "err.cr.not_yours")
     
     if cr["status"] != "proposed":
-        raise HTTPException(status_code=400, detail="CR must be in proposed status")
+        raise_http(400, "err.cr.not_proposed")
     
     contract = await db.contracts.find_one({"contract_id": cr["contract_id"]})
     if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+        raise_http(404, "err.contract.not_found")
     
     # 1. UPDATE CONTRACT VERSION
     new_version = contract["version"] + 1
@@ -28057,14 +28057,14 @@ async def approve_change_request(cr_id: str, user: User = Depends(get_current_us
 async def reject_change_request(cr_id: str, user: User = Depends(get_current_user)):
     # Client rejects CR
     if user.role != "client":
-        raise HTTPException(status_code=403, detail="Client access only")
+        raise_http(403, "err.client.access_only")
     
     cr = await db.change_requests.find_one({"change_request_id": cr_id})
     if not cr:
-        raise HTTPException(status_code=404, detail="CR not found")
+        raise_http(404, "err.cr.not_found")
     
     if cr["requested_by"] != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your CR")
+        raise_http(403, "err.cr.not_yours")
     
     await db.change_requests.update_one(
         {"change_request_id": cr_id},
@@ -28093,7 +28093,7 @@ async def get_project_change_requests(project_id: str, user: User = Depends(get_
 async def get_all_change_requests(status: Optional[str] = None, user: User = Depends(get_current_user)):
     # Admin CR queue
     if user.role not in ["admin"]:
-        raise HTTPException(status_code=403, detail="Admin access only")
+        raise_http(403, "err.admin.access_only")
     
     query = {}
     if status:
@@ -28206,13 +28206,13 @@ _recon_router = APIRouter(prefix="/api/payouts-v2/reconciliation")
 @_recon_router.get("/summary")
 async def _recon_summary(user=Depends(get_current_user)):
     if not _is_admin_user(user):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise_http(403, "err.admin.only")
     return await _pay_recon.summary(db)
 
 @_recon_router.post("/run")
 async def _recon_run(body: dict = None, user=Depends(get_current_user)):
     if not _is_admin_user(user):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise_http(403, "err.admin.only")
     body = body or {}
     window = int(body.get("window_minutes") or 60 * 24)
     return await _pay_recon.run_reconciliation(
@@ -28222,7 +28222,7 @@ async def _recon_run(body: dict = None, user=Depends(get_current_user)):
 @_recon_router.get("/runs")
 async def _recon_runs(limit: int = 50, user=Depends(get_current_user)):
     if not _is_admin_user(user):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise_http(403, "err.admin.only")
     items = await _pay_recon.list_runs(db, limit=limit)
     return {"items": items, "count": len(items)}
 
@@ -28235,7 +28235,7 @@ async def _recon_divergences(
     user=Depends(get_current_user),
 ):
     if not _is_admin_user(user):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise_http(403, "err.admin.only")
     items = await _pay_recon.list_divergences(
         db, state=state, severity=severity, item_id=item_id, limit=limit,
     )
@@ -28244,7 +28244,7 @@ async def _recon_divergences(
 @_recon_router.post("/divergences/{divergence_id}/resolve")
 async def _recon_resolve(divergence_id: str, body: dict, user=Depends(get_current_user)):
     if not _is_admin_user(user):
-        raise HTTPException(status_code=403, detail="Admin only")
+        raise_http(403, "err.admin.only")
     resolution = (body or {}).get("resolution") or "accepted"
     note = (body or {}).get("note") or ""
     try:
@@ -28255,7 +28255,7 @@ async def _recon_resolve(divergence_id: str, body: dict, user=Depends(get_curren
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     if not ok:
-        raise HTTPException(status_code=404, detail="No open divergence with that id")
+        raise_http(404, "err.divergence.none_open")
     return {"ok": True, "resolution": resolution}
 
 fastapi_app.include_router(_recon_router)
