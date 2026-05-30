@@ -75,6 +75,60 @@ _DICT: dict[str, dict[str, str]] = {
         "notif.deliverable_ready.body": "A new build for «{project}» is waiting.",
         "notif.welcome.title": "Welcome aboard!",
         "notif.welcome.body": "Your account is live. Start with the home tour.",
+        # --- Referrals / tiers / achievements --------------------------------
+        "notif.referral_earned.title": "Referral earned",
+        "notif.referral_earned.body": "You earned ${amount} from {referee}'s task.",
+        "notif.referral_milestone.title": "Milestone reached!",
+        "notif.referral_milestone.body": "{milestone} active referrals — keep going.",
+        "notif.tier_up_dev.title": "Tier upgraded to {tier}!",
+        "notif.tier_up_dev.body": "Your developer tier is now {tier}. Higher payouts apply.",
+        "notif.tier_up_client.title": "You reached {tier} tier!",
+        "notif.tier_up_client.body": "You unlocked {tier} perks. Discounts and priority support apply.",
+        "notif.dev_joined.title": "New developer joined your tree",
+        "notif.dev_joined.body": "{name} joined under your referral. You earn from their work.",
+        "notif.achievement_unlocked.title": "Achievement unlocked: {title}",
+        "notif.achievement_unlocked.body": "{description} +${amount} bonus",
+        # --- Payments / payouts ---------------------------------------------
+        "notif.payout.title": "Payout sent — ${amount}",
+        "notif.payout.body": "{count} tasks paid via {method}.",
+        "notif.payment_received_inv.title": "Payment received — ${amount}",
+        "notif.payment_received_inv.body": "{title}",
+        "notif.payment_link_resent.title": "Payment link resent",
+        "notif.payment_link_resent.body": "{title} — open Billing to pay.",
+        # --- Support / revisions --------------------------------------------
+        "notif.support_reply.title": "Support replied",
+        "notif.support_reply.body": "{preview}",
+        "notif.revision_requested.title": "Changes requested: {module}",
+        "notif.revision_requested.body": "{feedback}",
+        # --- Contracts (legal layer) ----------------------------------------
+        "notif.contract_signed_client.title": "Your agreement is signed",
+        "notif.contract_signed_client.body": "{project} is fully executed. You're ready to fund it.",
+        "notif.contract_signed_admin.title": "Agreement signed",
+        "notif.contract_signed_admin.body": "{client} signed the agreement for {project}{price_suffix}.",
+        "notif.contract_signed_dev.title": "Project unlocked",
+        "notif.contract_signed_dev.body": "{project} has been signed. Awaiting initial payment to start.",
+        "notif.contract_reminder.title": "Agreement waiting for your signature",
+        "notif.contract_reminder.body": "{project} — please review and sign to start work.",
+        # --- Module motion (work units) -------------------------------------
+        "notif.module_review.title": "Module ready for QA",
+        "notif.module_review.body": "«{module}» — review and accept or reject.",
+        "notif.module_done_earn.title": "Module accepted — ${amount}",
+        "notif.module_done_earn.body": "«{module}» shipped. Your share is in the next payout.",
+        "notif.module_done_ship.title": "Module accepted",
+        "notif.module_done_ship.body": "«{module}» shipped successfully.",
+        "notif.module_done_client.title": "Module shipped",
+        "notif.module_done_client.body": "«{module}» is live in your project.",
+        # --- Errors (HTTPException details) ---------------------------------
+        "err.auth.invalid_credentials": "Invalid email or password",
+        "err.auth.user_not_found": "User not found",
+        "err.auth.account_locked": "Account temporarily locked. Try again later.",
+        "err.auth.email_taken": "An account with this email already exists",
+        "err.otp.invalid": "Invalid or expired code",
+        "err.otp.too_many": "Too many attempts. Try again later.",
+        "err.invoice.not_found": "Invoice not found",
+        "err.invoice.already_paid": "Invoice already paid",
+        "err.permission.denied": "You don't have permission to do that",
+        "err.generic.bad_request": "Bad request",
     },
     "uk": {
         # --- OTP email -------------------------------------------------------
@@ -107,6 +161,60 @@ _DICT: dict[str, dict[str, str]] = {
         "notif.deliverable_ready.body": "Нова збірка по «{project}» чекає на вас.",
         "notif.welcome.title": "Ласкаво просимо!",
         "notif.welcome.body": "Ваш акаунт активний. Почніть з туру по головній.",
+        # --- Referrals / tiers / achievements --------------------------------
+        "notif.referral_earned.title": "Реферальний бонус",
+        "notif.referral_earned.body": "Ви отримали ${amount} з задачі {referee}.",
+        "notif.referral_milestone.title": "Досягнуто рубіж!",
+        "notif.referral_milestone.body": "{milestone} активних рефералів — продовжуйте.",
+        "notif.tier_up_dev.title": "Підвищення до рівня {tier}!",
+        "notif.tier_up_dev.body": "Ваш рівень розробника тепер {tier}. Виплати тепер вищі.",
+        "notif.tier_up_client.title": "Ви досягли рівня {tier}!",
+        "notif.tier_up_client.body": "Розблоковано переваги {tier}: знижки та пріоритетна підтримка.",
+        "notif.dev_joined.title": "Новий розробник у вашому дереві",
+        "notif.dev_joined.body": "{name} приєднався за вашим реферальним кодом. Ви отримуєте з його роботи.",
+        "notif.achievement_unlocked.title": "Досягнення відкрито: {title}",
+        "notif.achievement_unlocked.body": "{description} +${amount} бонус",
+        # --- Payments / payouts ---------------------------------------------
+        "notif.payout.title": "Виплату надіслано — ${amount}",
+        "notif.payout.body": "Оплачено {count} задач через {method}.",
+        "notif.payment_received_inv.title": "Платіж отримано — ${amount}",
+        "notif.payment_received_inv.body": "{title}",
+        "notif.payment_link_resent.title": "Посилання на оплату повторно надіслано",
+        "notif.payment_link_resent.body": "{title} — відкрийте Білінг для оплати.",
+        # --- Support / revisions --------------------------------------------
+        "notif.support_reply.title": "Відповідь підтримки",
+        "notif.support_reply.body": "{preview}",
+        "notif.revision_requested.title": "Запит на правки: {module}",
+        "notif.revision_requested.body": "{feedback}",
+        # --- Contracts (legal layer) ----------------------------------------
+        "notif.contract_signed_client.title": "Ваш договір підписано",
+        "notif.contract_signed_client.body": "{project} повністю погоджено. Можна фінансувати запуск.",
+        "notif.contract_signed_admin.title": "Договір підписано",
+        "notif.contract_signed_admin.body": "{client} підписав(-ла) договір по {project}{price_suffix}.",
+        "notif.contract_signed_dev.title": "Проєкт розблоковано",
+        "notif.contract_signed_dev.body": "{project} підписано. Очікуємо першого платежу для старту.",
+        "notif.contract_reminder.title": "Договір чекає вашого підпису",
+        "notif.contract_reminder.body": "{project} — будь ласка, перегляньте та підпишіть для старту.",
+        # --- Module motion --------------------------------------------------
+        "notif.module_review.title": "Модуль готовий до QA",
+        "notif.module_review.body": "«{module}» — перегляньте та прийміть або відхиліть.",
+        "notif.module_done_earn.title": "Модуль прийнято — ${amount}",
+        "notif.module_done_earn.body": "«{module}» здано. Ваша частка — у наступній виплаті.",
+        "notif.module_done_ship.title": "Модуль прийнято",
+        "notif.module_done_ship.body": "«{module}» успішно здано.",
+        "notif.module_done_client.title": "Модуль здано",
+        "notif.module_done_client.body": "«{module}» доступний у вашому проєкті.",
+        # --- Errors ---------------------------------------------------------
+        "err.auth.invalid_credentials": "Невірний email або пароль",
+        "err.auth.user_not_found": "Користувача не знайдено",
+        "err.auth.account_locked": "Акаунт тимчасово заблоковано. Спробуйте пізніше.",
+        "err.auth.email_taken": "Акаунт з таким email вже існує",
+        "err.otp.invalid": "Невірний або прострочений код",
+        "err.otp.too_many": "Забагато спроб. Спробуйте пізніше.",
+        "err.invoice.not_found": "Інвойс не знайдено",
+        "err.invoice.already_paid": "Інвойс вже оплачено",
+        "err.permission.denied": "У вас немає прав на цю дію",
+        "err.generic.bad_request": "Невірний запит",
     },
 }
 
@@ -196,4 +304,32 @@ def t(key: str, lang: Optional[str] = None, **kwargs: Any) -> str:
 
 
 # Public surface
-__all__ = ["resolve_lang", "t", "SUPPORTED", "DEFAULT_LANG"]
+__all__ = ["resolve_lang", "t", "raise_http", "SUPPORTED", "DEFAULT_LANG"]
+
+
+def raise_http(
+    status_code: int,
+    key: str,
+    request: Any = None,
+    user: Optional[dict] = None,
+    explicit_lang: Optional[str] = None,
+    **fmt: Any,
+):
+    """Raise an HTTPException with a localized `detail`.
+
+    Optional integration point for translating user-facing API errors.
+    Falls back to the English message (or the bare key) if the key
+    isn't registered. Safe to use from any route handler:
+
+        from i18n_backend import raise_http
+        raise_http(401, "err.auth.invalid_credentials", request=request)
+
+    The helper resolves language via `resolve_lang(request, user, explicit_lang)`
+    so it works whether the user is authenticated or anonymous.
+    """
+    # Imported lazily to keep this module free of FastAPI coupling at import.
+    from fastapi import HTTPException
+
+    lang = resolve_lang(request=request, user=user, explicit=explicit_lang)
+    detail = t(key, lang, **fmt)
+    raise HTTPException(status_code=status_code, detail=detail)
